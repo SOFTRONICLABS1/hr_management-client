@@ -113,7 +113,9 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
         let profile = userDoc.exists() ? userDoc.data() : null
 
-        if (!profile && claimRole === 'admin') {
+        const lastLoginMode = localStorage.getItem('loginMode')
+
+        if (!profile && (claimRole === 'admin' || lastLoginMode === 'admin')) {
           profile = {
             username: usernameFromEmail(firebaseUser.email || ''),
             role: 'admin',
@@ -239,6 +241,7 @@ export default function App() {
     setError('')
 
     try {
+      localStorage.setItem('loginMode', loginMode)
       await signInWithEmailAndPassword(auth, toEmail(username), password)
       setActive(loginMode === 'employee' ? 'employee-dashboard' : 'dashboard')
     } catch (err) {
