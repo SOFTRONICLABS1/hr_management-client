@@ -45,7 +45,6 @@ export default function App() {
   const [error, setError] = useState('')
   const [user, setUser] = useState(null)
   const [active, setActive] = useState('dashboard')
-  const [loginMode, setLoginMode] = useState('admin')
   const [passwordForm, setPasswordForm] = useState({
     current: '',
     next: '',
@@ -109,29 +108,15 @@ export default function App() {
   const userPermissions = user?.permissions || {}
 
   useEffect(() => {
-    if (window.location.hash === '#/employee-login') {
-      setLoginMode('employee')
-    } else if (window.location.hash === '#/admin-login') {
-      setLoginMode('admin')
-    }
-
-    const onHashChange = () => {
-      setLoginMode(window.location.hash === '#/employee-login' ? 'employee' : 'admin')
-    }
-    window.addEventListener('hashchange', onHashChange)
-
     const token = localStorage.getItem('token')
-    if (!token) {
-      return () => window.removeEventListener('hashchange', onHashChange)
-    }
+    if (!token) return
 
     authedFetch('/auth/me')
       .then((data) => {
         setUser(data.user)
+        setActive(data.user.role === 'employee' ? 'employee-dashboard' : 'dashboard')
       })
       .catch(() => {})
-
-    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
   useEffect(() => {
@@ -204,7 +189,7 @@ export default function App() {
       const data = await res.json()
       localStorage.setItem('token', data.token)
       setUser(data.user)
-      setActive(loginMode === 'employee' ? 'employee-dashboard' : 'dashboard')
+      setActive(data.user.role === 'employee' ? 'employee-dashboard' : 'dashboard')
     } catch (err) {
       setError(err.message || 'Login failed')
     } finally {
@@ -446,33 +431,10 @@ export default function App() {
           <div className="brand">
             <div className="logo">HR</div>
             <div>
-              <p className="eyebrow">{loginMode === 'admin' ? 'Admin Portal' : 'Employee Portal'}</p>
+              <p className="eyebrow">Welcome Back</p>
               <h1>Sign in</h1>
             </div>
           </div>
-          <div className="tabs">
-            <button
-              type="button"
-              className={`tab ${loginMode === 'admin' ? 'active' : ''}`}
-              onClick={() => {
-                window.location.hash = '#/admin-login'
-                setLoginMode('admin')
-              }}
-            >
-              Admin Login
-            </button>
-            <button
-              type="button"
-              className={`tab ${loginMode === 'employee' ? 'active' : ''}`}
-              onClick={() => {
-                window.location.hash = '#/employee-login'
-                setLoginMode('employee')
-              }}
-            >
-              Employee Login
-            </button>
-          </div>
-
           <form onSubmit={handleSubmit} className="form">
             <label>
               Username
@@ -577,6 +539,17 @@ export default function App() {
       </aside>
 
       <main className="main">
+        <div className="main-header">
+          <div>
+            <p className="eyebrow muted">
+              {user.role === 'admin' ? 'Admin Workspace' : 'Employee Workspace'}
+            </p>
+            <h1>{user.role === 'admin' ? 'HR Control Center' : 'My HR Hub'}</h1>
+          </div>
+          <div className="header-actions">
+            <span className="pill">{user.role.toUpperCase()}</span>
+          </div>
+        </div>
         {user.role === 'admin' && active === 'dashboard' && (
           <section>
             <h1>Dashboard</h1>
