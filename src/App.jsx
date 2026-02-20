@@ -1,21 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-} from 'firebase/firestore'
-import { getIdTokenResult, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
-import { auth, db } from './firebase'
 import './App.css'
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api'
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -25,16 +11,31 @@ const NAV_ITEMS = [
   { key: 'settings', label: 'Settings' },
 ]
 
-const USER_EMAIL_DOMAIN = 'hr-management.local'
-const API_BASE = import.meta.env.VITE_API_BASE || '/api'
+function useAuthedFetch(onUnauthorized) {
+  return async (path, options = {}) => {
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+    })
 
-function toEmail(username) {
-  if (!username) return ''
-  return username.includes('@') ? username : `${username}@${USER_EMAIL_DOMAIN}`
-}
+    if (res.status === 401) {
+      onUnauthorized()
+      throw new Error('Unauthorized')
+    }
 
-function usernameFromEmail(email = '') {
-  return email.split('@')[0] || ''
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.message || 'Request failed')
+    }
+
+    if (res.status === 204) return null
+    return res.json()
+  }
 }
 
 export default function App() {
@@ -88,6 +89,11 @@ export default function App() {
 
   const employeeOptions = useMemo(() => employees, [employees])
 
+  const authedFetch = useAuthedFetch(() => {
+    localStorage.removeItem('token')
+    setUser(null)
+  })
+
   useEffect(() => {
     if (window.location.hash === '#/employee-login') {
       setLoginMode('employee')
@@ -100,62 +106,53 @@ export default function App() {
     }
     window.addEventListener('hashchange', onHashChange)
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null)
-        return
-      }
-
-      try {
-        const tokenResult = await getIdTokenResult(firebaseUser, true)
-        const claimRole = tokenResult.claims.role || null
-
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
-        let profile = userDoc.exists() ? userDoc.data() : null
-
-        const lastLoginMode = localStorage.getItem('loginMode')
-
-        if (!profile && (claimRole === 'admin' || lastLoginMode === 'admin')) {
-          profile = {
-            username: usernameFromEmail(firebaseUser.email || ''),
-            role: 'admin',
-            created_at: serverTimestamp(),
-          }
-          await setDoc(doc(db, 'users', firebaseUser.uid), profile)
-        }
-
-        setUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          username: profile?.username || usernameFromEmail(firebaseUser.email || ''),
-          role: claimRole || profile?.role || 'employee',
-          employee_id: profile?.employee_id || null,
-        })
-      } catch (err) {
-        setError('Signed in, but profile setup failed. Check Firestore rules.')
-        setUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          username: usernameFromEmail(firebaseUser.email || ''),
-          role: 'employee',
-          employee_id: null,
-        })
-      }
-    })
-
-    return () => {
-      window.removeEventListener('hashchange', onHashChange)
-      unsubscribe()
+    const token = localStorage.getItem('token')
+    if (!token) {
+      return () => window.removeEventListener('hashchange', onHashChange)
     }
+
+    authedFetch('/auth/me')
+      .then((data) => {
+        setUser(data.user)
+      })
+      .catch(() => {})
+
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
   useEffect(() => {
     if (!user) return
 
     if (user.role === 'admin') {
-      loadAdminData()
+      Promise.all([
+        authedFetch('/employees'),
+        authedFetch('/attendance'),
+        authedFetch('/leave'),
+        authedFetch('/settings'),
+      ])
+        .then(([employeesData, attendanceData, leaveData, settingsData]) => {
+          setEmployees(employeesData)
+          setAttendance(attendanceData)
+          setLeaveRequests(leaveData)
+          setSettings({
+            companyName: settingsData.companyName || '',
+            timezone: settingsData.timezone || '',
+            defaultWorkHours: settingsData.defaultWorkHours || '',
+          })
+        })
+        .catch(() => {})
     } else if (user.role === 'employee') {
-      loadEmployeeData()
+      Promise.all([
+        authedFetch('/employee/me'),
+        authedFetch('/employee/attendance'),
+        authedFetch('/employee/leave'),
+      ])
+        .then(([profile, attendanceData, leaveData]) => {
+          setEmployeeProfile(profile)
+          setEmployeeAttendance(attendanceData)
+          setEmployeeLeave(leaveData)
+        })
+        .catch(() => {})
     }
   }, [user])
 
@@ -169,80 +166,26 @@ export default function App() {
     }
   }, [user, active])
 
-  async function adminApi(path, body) {
-    const token = await auth.currentUser?.getIdToken()
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    })
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.message || 'Request failed')
-    }
-
-    return res.json()
-  }
-
-  async function loadAdminData() {
-    const employeesSnap = await getDocs(query(collection(db, 'employees'), orderBy('created_at', 'desc')))
-    const employeesData = employeesSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-    setEmployees(employeesData)
-
-    const attendanceSnap = await getDocs(query(collection(db, 'attendance'), orderBy('created_at', 'desc')))
-    const attendanceData = attendanceSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-    setAttendance(attendanceData)
-
-    const leaveSnap = await getDocs(query(collection(db, 'leave_requests'), orderBy('created_at', 'desc')))
-    const leaveData = leaveSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-    setLeaveRequests(leaveData)
-
-    const settingsDoc = await getDoc(doc(db, 'settings', 'company'))
-    const settingsData = settingsDoc.exists() ? settingsDoc.data() : {}
-    setSettings({
-      companyName: settingsData.companyName || '',
-      timezone: settingsData.timezone || '',
-      defaultWorkHours: settingsData.defaultWorkHours || '',
-    })
-  }
-
-  async function loadEmployeeData() {
-    if (!user?.employee_id) return
-
-    const profileDoc = await getDoc(doc(db, 'employees', user.employee_id))
-    setEmployeeProfile(profileDoc.exists() ? { id: profileDoc.id, ...profileDoc.data() } : null)
-
-    const attendanceSnap = await getDocs(
-      query(
-        collection(db, 'attendance'),
-        where('employee_id', '==', user.employee_id),
-        orderBy('date', 'desc'),
-      ),
-    )
-    setEmployeeAttendance(attendanceSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
-
-    const leaveSnap = await getDocs(
-      query(
-        collection(db, 'leave_requests'),
-        where('employee_id', '==', user.employee_id),
-        orderBy('created_at', 'desc'),
-      ),
-    )
-    setEmployeeLeave(leaveSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })))
-  }
-
   async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
     setError('')
 
     try {
-      localStorage.setItem('loginMode', loginMode)
-      await signInWithEmailAndPassword(auth, toEmail(username), password)
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message || 'Login failed')
+      }
+
+      const data = await res.json()
+      localStorage.setItem('token', data.token)
+      setUser(data.user)
       setActive(loginMode === 'employee' ? 'employee-dashboard' : 'dashboard')
     } catch (err) {
       setError(err.message || 'Login failed')
@@ -251,8 +194,8 @@ export default function App() {
     }
   }
 
-  async function handleLogout() {
-    await signOut(auth)
+  function handleLogout() {
+    localStorage.removeItem('token')
     setUser(null)
     setUsername('')
     setPassword('')
@@ -267,32 +210,33 @@ export default function App() {
         return
       }
 
-      const response = await adminApi('/admin/create-employee', {
-        username: employeeForm.username,
-        password: employeeForm.tempPassword,
-        employee: {
+      const created = await authedFetch('/employees', {
+        method: 'POST',
+        body: JSON.stringify({
           name: employeeForm.name,
           email: employeeForm.email,
           role: employeeForm.role,
           department: employeeForm.department,
           status: employeeForm.status,
-        },
+          username: employeeForm.username,
+          password: employeeForm.tempPassword,
+        }),
       })
 
-      setEmployees((prev) => [{ ...response.employee }, ...prev])
+      setEmployees((prev) => [created, ...prev])
     } else {
-      const payload = {
-        name: employeeForm.name,
-        email: employeeForm.email,
-        role: employeeForm.role,
-        department: employeeForm.department,
-        status: employeeForm.status,
-      }
+      const updated = await authedFetch(`/employees?id=${editingEmployee.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: employeeForm.name,
+          email: employeeForm.email,
+          role: employeeForm.role,
+          department: employeeForm.department,
+          status: employeeForm.status,
+        }),
+      })
 
-      await updateDoc(doc(db, 'employees', editingEmployee.id), payload)
-      setEmployees((prev) =>
-        prev.map((item) => (item.id === editingEmployee.id ? { ...item, ...payload } : item)),
-      )
+      setEmployees((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingEmployee(null)
     }
 
@@ -321,28 +265,39 @@ export default function App() {
   }
 
   async function deleteEmployee(id) {
-    await deleteDoc(doc(db, 'employees', id))
+    await authedFetch(`/employees?id=${id}`, { method: 'DELETE' })
     setEmployees((prev) => prev.filter((item) => item.id !== id))
   }
 
   async function upsertAttendance(e) {
     e.preventDefault()
-    const payload = { ...attendanceForm, employee_id: attendanceForm.employee_id }
-    const employee = employees.find((item) => item.id === payload.employee_id)
-    const enriched = { ...payload, employee_name: employee?.name || '' }
+    const employee = employees.find((item) => item.id === attendanceForm.employee_id)
 
     if (editingAttendance) {
-      await updateDoc(doc(db, 'attendance', editingAttendance.id), enriched)
-      setAttendance((prev) =>
-        prev.map((item) => (item.id === editingAttendance.id ? { ...item, ...enriched } : item)),
-      )
+      const updated = await authedFetch(`/attendance?id=${editingAttendance.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          employee_id: attendanceForm.employee_id,
+          employee_name: employee?.name || '',
+          date: attendanceForm.date,
+          status: attendanceForm.status,
+        }),
+      })
+
+      setAttendance((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingAttendance(null)
     } else {
-      const result = await addDoc(collection(db, 'attendance'), {
-        ...enriched,
-        created_at: serverTimestamp(),
+      const created = await authedFetch('/attendance', {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: attendanceForm.employee_id,
+          employee_name: employee?.name || '',
+          date: attendanceForm.date,
+          status: attendanceForm.status,
+        }),
       })
-      setAttendance((prev) => [{ id: result.id, ...enriched }, ...prev])
+
+      setAttendance((prev) => [created, ...prev])
     }
 
     setAttendanceForm({ employee_id: '', date: '', status: 'Present' })
@@ -358,28 +313,43 @@ export default function App() {
   }
 
   async function deleteAttendance(id) {
-    await deleteDoc(doc(db, 'attendance', id))
+    await authedFetch(`/attendance?id=${id}`, { method: 'DELETE' })
     setAttendance((prev) => prev.filter((item) => item.id !== id))
   }
 
   async function upsertLeave(e) {
     e.preventDefault()
-    const payload = { ...leaveForm, employee_id: leaveForm.employee_id }
-    const employee = employees.find((item) => item.id === payload.employee_id)
-    const enriched = { ...payload, employee_name: employee?.name || '' }
+    const employee = employees.find((item) => item.id === leaveForm.employee_id)
 
     if (editingLeave) {
-      await updateDoc(doc(db, 'leave_requests', editingLeave.id), enriched)
-      setLeaveRequests((prev) =>
-        prev.map((item) => (item.id === editingLeave.id ? { ...item, ...enriched } : item)),
-      )
+      const updated = await authedFetch(`/leave?id=${editingLeave.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          employee_id: leaveForm.employee_id,
+          employee_name: employee?.name || '',
+          start_date: leaveForm.start_date,
+          end_date: leaveForm.end_date,
+          reason: leaveForm.reason,
+          status: leaveForm.status,
+        }),
+      })
+
+      setLeaveRequests((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingLeave(null)
     } else {
-      const result = await addDoc(collection(db, 'leave_requests'), {
-        ...enriched,
-        created_at: serverTimestamp(),
+      const created = await authedFetch('/leave', {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: leaveForm.employee_id,
+          employee_name: employee?.name || '',
+          start_date: leaveForm.start_date,
+          end_date: leaveForm.end_date,
+          reason: leaveForm.reason,
+          status: leaveForm.status,
+        }),
       })
-      setLeaveRequests((prev) => [{ id: result.id, ...enriched }, ...prev])
+
+      setLeaveRequests((prev) => [created, ...prev])
     }
 
     setLeaveForm({ employee_id: '', start_date: '', end_date: '', reason: '', status: 'Pending' })
@@ -397,33 +367,35 @@ export default function App() {
   }
 
   async function deleteLeave(id) {
-    await deleteDoc(doc(db, 'leave_requests', id))
+    await authedFetch(`/leave?id=${id}`, { method: 'DELETE' })
     setLeaveRequests((prev) => prev.filter((item) => item.id !== id))
   }
 
   async function saveSettings(e) {
     e.preventDefault()
-    await setDoc(doc(db, 'settings', 'company'), settings, { merge: true })
+    await authedFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    })
   }
 
   async function applyLeave(e) {
     e.preventDefault()
-    const payload = {
-      start_date: leaveForm.start_date,
-      end_date: leaveForm.end_date,
-      reason: leaveForm.reason,
-      status: 'Pending',
-      employee_id: user.employee_id,
-      employee_name: employeeProfile?.name || '',
-      created_at: serverTimestamp(),
-    }
-    const result = await addDoc(collection(db, 'leave_requests'), payload)
-    setEmployeeLeave((prev) => [{ id: result.id, ...payload }, ...prev])
+    const created = await authedFetch('/employee/leave', {
+      method: 'POST',
+      body: JSON.stringify({
+        start_date: leaveForm.start_date,
+        end_date: leaveForm.end_date,
+        reason: leaveForm.reason,
+      }),
+    })
+
+    setEmployeeLeave((prev) => [created, ...prev])
     setLeaveForm({ employee_id: '', start_date: '', end_date: '', reason: '', status: 'Pending' })
   }
 
   async function deleteEmployeeLeave(id) {
-    await deleteDoc(doc(db, 'leave_requests', id))
+    await authedFetch(`/employee/leave?id=${id}`, { method: 'DELETE' })
     setEmployeeLeave((prev) => prev.filter((item) => item.id !== id))
   }
 
@@ -930,9 +902,7 @@ export default function App() {
                 <div className="table-row cols-3" key={entry.id}>
                   <span>{entry.date}</span>
                   <span>{entry.status}</span>
-                  <span>
-                    {entry.created_at?.toDate ? entry.created_at.toDate().toLocaleString() : ''}
-                  </span>
+                  <span>{entry.created_at || ''}</span>
                 </div>
               ))}
             </div>
@@ -994,9 +964,7 @@ export default function App() {
                   </span>
                   <span>{entry.reason}</span>
                   <span>{entry.status}</span>
-                  <span>
-                    {entry.created_at?.toDate ? entry.created_at.toDate().toLocaleDateString() : ''}
-                  </span>
+                  <span>{entry.created_at || ''}</span>
                   <span className="actions">
                     {entry.status === 'Pending' ? (
                       <button type="button" onClick={() => deleteEmployeeLeave(entry.id)} className="danger">
