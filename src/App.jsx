@@ -46,6 +46,11 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [active, setActive] = useState('dashboard')
   const [loginMode, setLoginMode] = useState('admin')
+  const [passwordForm, setPasswordForm] = useState({
+    current: '',
+    next: '',
+    confirm: '',
+  })
 
   const [employees, setEmployees] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -67,6 +72,13 @@ export default function App() {
     status: 'Active',
     username: '',
     tempPassword: '',
+    permissions: {
+      attendance_view: true,
+      leave_apply: true,
+      profile_view: true,
+    },
+    search: '',
+    statusFilter: 'All',
   })
 
   const [attendanceForm, setAttendanceForm] = useState({
@@ -93,6 +105,8 @@ export default function App() {
     localStorage.removeItem('token')
     setUser(null)
   })
+
+  const userPermissions = user?.permissions || {}
 
   useEffect(() => {
     if (window.location.hash === '#/employee-login') {
@@ -142,11 +156,15 @@ export default function App() {
         })
         .catch(() => {})
     } else if (user.role === 'employee') {
-      Promise.all([
-        authedFetch('/employee/me'),
-        authedFetch('/employee/attendance'),
-        authedFetch('/employee/leave'),
-      ])
+      const tasks = []
+      if (userPermissions.profile_view) tasks.push(authedFetch('/employee/me'))
+      else tasks.push(Promise.resolve(null))
+      if (userPermissions.attendance_view) tasks.push(authedFetch('/employee/attendance'))
+      else tasks.push(Promise.resolve([]))
+      if (userPermissions.leave_apply) tasks.push(authedFetch('/employee/leave'))
+      else tasks.push(Promise.resolve([]))
+
+      Promise.all(tasks)
         .then(([profile, attendanceData, leaveData]) => {
           setEmployeeProfile(profile)
           setEmployeeAttendance(attendanceData)
@@ -209,6 +227,14 @@ export default function App() {
         setError('Username and password are required for new employees.')
         return
       }
+      if (employeeForm.tempPassword.length < 6) {
+        setError('Password must be at least 6 characters.')
+        return
+      }
+      if (!employeeForm.email.includes('@')) {
+        setError('Please enter a valid email.')
+        return
+      }
 
       const created = await authedFetch('/employees', {
         method: 'POST',
@@ -220,6 +246,7 @@ export default function App() {
           status: employeeForm.status,
           username: employeeForm.username,
           password: employeeForm.tempPassword,
+          permissions: employeeForm.permissions,
         }),
       })
 
@@ -233,6 +260,7 @@ export default function App() {
           role: employeeForm.role,
           department: employeeForm.department,
           status: employeeForm.status,
+          permissions: employeeForm.permissions,
         }),
       })
 
@@ -248,6 +276,13 @@ export default function App() {
       status: 'Active',
       username: '',
       tempPassword: '',
+      permissions: {
+        attendance_view: true,
+        leave_apply: true,
+        profile_view: true,
+      },
+      search: employeeForm.search,
+      statusFilter: employeeForm.statusFilter,
     })
   }
 
@@ -261,6 +296,11 @@ export default function App() {
       status: employee.status,
       username: '',
       tempPassword: '',
+      permissions: employee.permissions || {
+        attendance_view: true,
+        leave_apply: true,
+        profile_view: true,
+      },
     })
   }
 
@@ -500,27 +540,33 @@ export default function App() {
               >
                 My Dashboard
               </button>
-              <button
-                className={`nav-item ${active === 'employee-attendance' ? 'active' : ''}`}
-                type="button"
-                onClick={() => setActive('employee-attendance')}
-              >
-                My Attendance
-              </button>
-              <button
-                className={`nav-item ${active === 'employee-leave' ? 'active' : ''}`}
-                type="button"
-                onClick={() => setActive('employee-leave')}
-              >
-                My Leave
-              </button>
-              <button
-                className={`nav-item ${active === 'employee-profile' ? 'active' : ''}`}
-                type="button"
-                onClick={() => setActive('employee-profile')}
-              >
-                My Profile
-              </button>
+              {userPermissions.attendance_view && (
+                <button
+                  className={`nav-item ${active === 'employee-attendance' ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setActive('employee-attendance')}
+                >
+                  My Attendance
+                </button>
+              )}
+              {userPermissions.leave_apply && (
+                <button
+                  className={`nav-item ${active === 'employee-leave' ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setActive('employee-leave')}
+                >
+                  My Leave
+                </button>
+              )}
+              {userPermissions.profile_view && (
+                <button
+                  className={`nav-item ${active === 'employee-profile' ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setActive('employee-profile')}
+                >
+                  My Profile
+                </button>
+              )}
             </>
           )}
         </nav>
@@ -632,9 +678,80 @@ export default function App() {
                     </label>
                   </>
                 )}
+                <label>
+                  Permissions
+                  <div className="checkbox-group">
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={employeeForm.permissions.attendance_view}
+                        onChange={(e) =>
+                          setEmployeeForm({
+                            ...employeeForm,
+                            permissions: {
+                              ...employeeForm.permissions,
+                              attendance_view: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      View Attendance
+                    </label>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={employeeForm.permissions.leave_apply}
+                        onChange={(e) =>
+                          setEmployeeForm({
+                            ...employeeForm,
+                            permissions: {
+                              ...employeeForm.permissions,
+                              leave_apply: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      Apply Leave
+                    </label>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={employeeForm.permissions.profile_view}
+                        onChange={(e) =>
+                          setEmployeeForm({
+                            ...employeeForm,
+                            permissions: {
+                              ...employeeForm.permissions,
+                              profile_view: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      View Profile
+                    </label>
+                  </div>
+                </label>
               </div>
               <button type="submit">{editingEmployee ? 'Update Employee' : 'Add Employee'}</button>
             </form>
+
+            <div className="filters">
+              <input
+                type="text"
+                placeholder="Search by name or email"
+                value={employeeForm.search || ''}
+                onChange={(e) => setEmployeeForm({ ...employeeForm, search: e.target.value })}
+              />
+              <select
+                value={employeeForm.statusFilter || 'All'}
+                onChange={(e) => setEmployeeForm({ ...employeeForm, statusFilter: e.target.value })}
+              >
+                <option>All</option>
+                <option>Active</option>
+                <option>Onboarding</option>
+                <option>Inactive</option>
+              </select>
+            </div>
 
             <div className="table">
               <div className="table-header">
@@ -645,7 +762,18 @@ export default function App() {
                 <span>Status</span>
                 <span>Actions</span>
               </div>
-              {employees.map((employee) => (
+              {employees
+                .filter((employee) => {
+                  const query = (employeeForm.search || '').toLowerCase()
+                  const matchesQuery =
+                    !query ||
+                    employee.name.toLowerCase().includes(query) ||
+                    employee.email.toLowerCase().includes(query)
+                  const statusFilter = employeeForm.statusFilter || 'All'
+                  const matchesStatus = statusFilter === 'All' || employee.status === statusFilter
+                  return matchesQuery && matchesStatus
+                })
+                .map((employee) => (
                 <div className="table-row" key={employee.id}>
                   <span>{employee.name}</span>
                   <span>{employee.email}</span>
@@ -866,6 +994,46 @@ export default function App() {
               </div>
               <button type="submit">Save Settings</button>
             </form>
+
+            <form className="panel" onSubmit={changePassword}>
+              <h2>Change Admin Password</h2>
+              <div className="grid">
+                <label>
+                  Current Password
+                  <input
+                    type="password"
+                    value={passwordForm.current}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, current: e.target.value })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  New Password
+                  <input
+                    type="password"
+                    value={passwordForm.next}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, next: e.target.value })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Confirm New Password
+                  <input
+                    type="password"
+                    value={passwordForm.confirm}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, confirm: e.target.value })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+              <button type="submit">Update Password</button>
+            </form>
           </section>
         )}
 
@@ -1014,3 +1182,26 @@ export default function App() {
     </div>
   )
 }
+  async function changePassword(e) {
+    e.preventDefault()
+    setError('')
+
+    if (passwordForm.next.length < 6) {
+      setError('New password must be at least 6 characters.')
+      return
+    }
+    if (passwordForm.next !== passwordForm.confirm) {
+      setError('New password and confirmation do not match.')
+      return
+    }
+
+    await authedFetch('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        currentPassword: passwordForm.current,
+        newPassword: passwordForm.next,
+      }),
+    })
+
+    setPasswordForm({ current: '', next: '', confirm: '' })
+  }
