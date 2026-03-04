@@ -55,11 +55,16 @@ export default function App() {
     next: '',
     confirm: '',
   })
+  const [passwordError, setPasswordError] = useState('')
+  const [showPasswordFields, setShowPasswordFields] = useState(false)
 
   const [employees, setEmployees] = useState([])
   const [attendance, setAttendance] = useState([])
   const [leaveRequests, setLeaveRequests] = useState([])
   const [payslips, setPayslips] = useState([])
+  const [payslipRequests, setPayslipRequests] = useState([])
+  const [employeePayslipRequests, setEmployeePayslipRequests] = useState([])
+  const [employeePayslips, setEmployeePayslips] = useState([])
   const [settings, setSettings] = useState({
     companyName: '',
     timezone: '',
@@ -68,6 +73,7 @@ export default function App() {
   const [employeeProfile, setEmployeeProfile] = useState(null)
   const [employeeAttendance, setEmployeeAttendance] = useState([])
   const [employeeLeave, setEmployeeLeave] = useState([])
+  const [employeePayslipRequestMonth, setEmployeePayslipRequestMonth] = useState('')
 
   const defaultEmployeeForm = {
     name: '',
@@ -77,6 +83,7 @@ export default function App() {
     status: 'Active',
     username: '',
     tempPassword: '',
+    resetPassword: '',
     permissions: {
       attendance_view: true,
       leave_apply: true,
@@ -146,6 +153,7 @@ export default function App() {
   const [showTempPassword, setShowTempPassword] = useState(false)
   const [usePrevMonth, setUsePrevMonth] = useState(false)
   const [prevMonthNotice, setPrevMonthNotice] = useState('')
+  const [payslipRequestId, setPayslipRequestId] = useState(null)
 
   const handleNumericChange = (field, value) => {
     const clean = sanitizeIntInput(value)
@@ -273,6 +281,20 @@ export default function App() {
     setLeaveRequests(data)
   }
 
+  const refreshPayslipRequests = async () => {
+    const data = await authedFetchAuth('/payslip-requests')
+    setPayslipRequests(data)
+  }
+
+  const refreshEmployeePayslips = async () => {
+    const [requests, payslipsData] = await Promise.all([
+      authedFetchAuth('/employee/payslip-requests'),
+      authedFetchAuth('/employee/payslips'),
+    ])
+    setEmployeePayslipRequests(requests)
+    setEmployeePayslips(payslipsData)
+  }
+
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) return
@@ -294,13 +316,23 @@ export default function App() {
         authedFetchHR('/attendance'),
         authedFetchHR('/leave'),
         authedFetchAuth('/payslips'),
+        authedFetchAuth('/payslip-requests'),
         authedFetchAuth('/settings'),
       ])
-        .then(([employeesData, attendanceData, leaveData, payslipsData, settingsData]) => {
+        .then(
+          ([
+            employeesData,
+            attendanceData,
+            leaveData,
+            payslipsData,
+            payslipRequestsData,
+            settingsData,
+          ]) => {
           setEmployees(employeesData)
           setAttendance(attendanceData)
           setLeaveRequests(leaveData)
           setPayslips(payslipsData)
+          setPayslipRequests(payslipRequestsData)
           setSettings({
             companyName: settingsData.companyName || '',
             timezone: settingsData.timezone || '',
@@ -316,12 +348,16 @@ export default function App() {
       else tasks.push(Promise.resolve([]))
       if (userPermissions.leave_apply) tasks.push(authedFetchHR('/employee/leave'))
       else tasks.push(Promise.resolve([]))
+      tasks.push(authedFetchAuth('/employee/payslip-requests'))
+      tasks.push(authedFetchAuth('/employee/payslips'))
 
       Promise.all(tasks)
-        .then(([profile, attendanceData, leaveData]) => {
+        .then(([profile, attendanceData, leaveData, payslipRequestData, payslipData]) => {
           setEmployeeProfile(profile)
           setEmployeeAttendance(attendanceData)
           setEmployeeLeave(leaveData)
+          setEmployeePayslipRequests(payslipRequestData)
+          setEmployeePayslips(payslipData)
         })
         .catch(() => {})
     }
@@ -332,6 +368,13 @@ export default function App() {
     if (user.role !== 'admin') return
     if (active !== 'leave') return
     refreshLeaveRequests().catch(() => {})
+  }, [active, user])
+
+  useEffect(() => {
+    if (!user) return
+    if (user.role !== 'admin') return
+    if (active !== 'payslips') return
+    refreshPayslipRequests().catch(() => {})
   }, [active, user])
 
   useEffect(() => {
@@ -422,7 +465,7 @@ export default function App() {
 
       setEmployees((prev) => [created, ...prev])
     } else {
-      const updated = await authedFetchAuth(`/employees?id=${editingEmployee.id}`, {
+      const updated = await authedFetchAuth(`/employees/${editingEmployee.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           name: employeeForm.name,
@@ -431,6 +474,7 @@ export default function App() {
           department: employeeForm.department,
           status: employeeForm.status,
           permissions: employeeForm.permissions,
+          reset_password: employeeForm.resetPassword || '',
         }),
       })
 
@@ -451,6 +495,7 @@ export default function App() {
       status: employee.status,
       username: '',
       tempPassword: '',
+      resetPassword: '',
       permissions: employee.permissions || {
         attendance_view: true,
         leave_apply: true,
@@ -471,8 +516,17 @@ export default function App() {
     setEmployeeForm((prev) => ({ ...prev, tempPassword: value }))
   }
 
+  function generateResetPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$'
+    let value = ''
+    for (let i = 0; i < 10; i += 1) {
+      value += chars[Math.floor(Math.random() * chars.length)]
+    }
+    setEmployeeForm((prev) => ({ ...prev, resetPassword: value }))
+  }
+
   async function deleteEmployee(id) {
-    await authedFetchAuth(`/employees?id=${id}`, { method: 'DELETE' })
+    await authedFetchAuth(`/employees/${id}`, { method: 'DELETE' })
     setEmployees((prev) => prev.filter((item) => item.id !== id))
   }
 
@@ -482,6 +536,7 @@ export default function App() {
     setEditingPayslip(null)
     setUsePrevMonth(false)
     setPrevMonthNotice('')
+    setPayslipRequestId(null)
   }
 
   function handlePayslipEmployeeChange(employeeId) {
@@ -493,6 +548,16 @@ export default function App() {
       role: selected?.role || prev.role,
       role_designation: selected?.department || prev.role_designation,
     }))
+  }
+
+  function loadPayslipRequest(request) {
+    handlePayslipEmployeeChange(request.employee_id)
+    setPayslipForm((prev) => ({
+      ...prev,
+      month: request.month || '',
+    }))
+    setPayslipRequestId(request.id)
+    setUsePrevMonth(false)
   }
 
   useEffect(() => {
@@ -582,6 +647,14 @@ export default function App() {
     setPayslips((prev) => prev.filter((item) => item.id !== id))
   }
 
+  async function updatePayslipRequestStatus(id, status, payslipId = null) {
+    const updated = await authedFetchAuth(`/payslip-requests/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, payslip_id: payslipId }),
+    })
+    setPayslipRequests((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+  }
+
   async function downloadPayslip(entry) {
     const token = localStorage.getItem('token')
     const res = await fetch(`${API_BASE_AUTH}/payslips/${entry.id}/pdf`, {
@@ -649,11 +722,17 @@ export default function App() {
       setPayslips((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       resetPayslipForm()
     } else {
+      if (payslipRequestId) {
+        payload.request_id = payslipRequestId
+      }
       const created = await authedFetchAuth('/payslips', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
       setPayslips((prev) => [created, ...prev])
+      if (payslipRequestId) {
+        await refreshPayslipRequests()
+      }
       resetPayslipForm()
     }
   }
@@ -812,6 +891,67 @@ export default function App() {
     setEmployeeLeave((prev) => prev.filter((item) => item.id !== id))
   }
 
+  async function requestPayslip(e) {
+    e.preventDefault()
+    const created = await authedFetchAuth('/employee/payslip-requests', {
+      method: 'POST',
+      body: JSON.stringify({ month: employeePayslipRequestMonth }),
+    })
+    setEmployeePayslipRequests((prev) => [created, ...prev])
+    setEmployeePayslipRequestMonth('')
+  }
+
+  async function downloadEmployeePayslip(entry) {
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${API_BASE_AUTH}/employee/payslips/${entry.id}/pdf`, {
+      headers: { Authorization: token ? `Bearer ${token}` : '' },
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.message || 'Failed to download payslip.')
+    }
+
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const safeName = (entry.name || 'Employee').replace(/[^a-z0-9-_]/gi, '_')
+    const safeMonth = (entry.month || 'Payslip').replace(/[^a-z0-9-_]/gi, '_')
+    link.href = url
+    link.download = `Payslip-${safeName}-${safeMonth}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  }
+
+  async function changePassword(e) {
+    e.preventDefault()
+    setPasswordError('')
+
+    if (passwordForm.next.length < 6) {
+      setPasswordError('New password must be at least 6 characters.')
+      return
+    }
+    if (passwordForm.next !== passwordForm.confirm) {
+      setPasswordError('New password and confirmation do not match.')
+      return
+    }
+
+    try {
+      await authedFetchAuth('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          currentPassword: passwordForm.current,
+          newPassword: passwordForm.next,
+        }),
+      })
+      setPasswordForm({ current: '', next: '', confirm: '' })
+    } catch (err) {
+      setPasswordError(err.message || 'Failed to update password.')
+    }
+  }
+
   if (!user) {
     return (
       <div className="page">
@@ -908,6 +1048,13 @@ export default function App() {
                   My Leave
                 </button>
               )}
+              <button
+                className={`nav-item ${active === 'employee-payslips' ? 'active' : ''}`}
+                type="button"
+                onClick={() => setActive('employee-payslips')}
+              >
+                My Payslips
+              </button>
               {userPermissions.profile_view && (
                 <button
                   className={`nav-item ${active === 'employee-profile' ? 'active' : ''}`}
@@ -1107,6 +1254,34 @@ export default function App() {
                         </span>
                       </label>
                     </>
+                  )}
+                  {editingEmployee && (
+                    <label>
+                      Reset Password
+                      <div className="input-row">
+                        <input
+                          type={showTempPassword ? 'text' : 'password'}
+                          value={employeeForm.resetPassword}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, resetPassword: e.target.value })
+                          }
+                          placeholder="New password"
+                        />
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => setShowTempPassword((prev) => !prev)}
+                        >
+                          {showTempPassword ? 'Hide' : 'Show'}
+                        </button>
+                        <button type="button" className="secondary" onClick={generateResetPassword}>
+                          Generate
+                        </button>
+                      </div>
+                      <span className="field-hint">
+                        If provided, the employee login password will be reset.
+                      </span>
+                    </label>
                   )}
                     <label>
                       Permissions
@@ -1471,17 +1646,100 @@ export default function App() {
               </div>
             </div>
 
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Payslip Requests</h2>
+                  <p className="muted">Employees can request payslips for a month.</p>
+                </div>
+                <button type="button" className="ghost" onClick={refreshPayslipRequests}>
+                  Refresh
+                </button>
+              </div>
+              <div className="table">
+                <div className="table-header cols-5">
+                  <span>Employee</span>
+                  <span>Month</span>
+                  <span>Status</span>
+                  <span>Requested</span>
+                  <span>Actions</span>
+                </div>
+                {payslipRequests.map((request) => (
+                  <div className="table-row cols-5" key={request.id}>
+                    <span>{request.employee_name || 'Unknown'}</span>
+                    <span>{request.month}</span>
+                    <span>{request.status}</span>
+                    <span>{request.created_at || '-'}</span>
+                    <span className="actions">
+                      {(() => {
+                        const existingPayslip = payslips.find(
+                          (item) =>
+                            String(item.employee_id) === String(request.employee_id) &&
+                            String(item.month) === String(request.month),
+                        )
+                        if (request.status !== 'Pending') {
+                          return <span className="muted">-</span>
+                        }
+                        if (existingPayslip) {
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updatePayslipRequestStatus(
+                                    request.id,
+                                    'Generated',
+                                    existingPayslip.id,
+                                  )
+                                }
+                              >
+                                Send Payslip
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => updatePayslipRequestStatus(request.id, 'Rejected')}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )
+                        }
+                        return (
+                          <>
+                            <button type="button" onClick={() => loadPayslipRequest(request)}>
+                              Fill Payslip
+                            </button>
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => updatePayslipRequestStatus(request.id, 'Rejected')}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )
+                      })()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <form className="panel payslip-form" onSubmit={upsertPayslip}>
               <div className="panel-header">
                 <div>
                   <h2>{editingPayslip ? 'Edit Payslip Details' : 'Add Payslip Details'}</h2>
                   <p className="muted">Fill in the fields to generate a PDF payslip.</p>
                 </div>
-                {editingPayslip && (
-                  <button type="button" className="ghost" onClick={resetPayslipForm}>
-                    Clear
-                  </button>
-                )}
+                <div className="header-actions">
+                  {payslipRequestId && <span className="pill subtle">Request #{payslipRequestId}</span>}
+                  {editingPayslip && (
+                    <button type="button" className="ghost" onClick={resetPayslipForm}>
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid">
@@ -1879,39 +2137,67 @@ export default function App() {
 
             <form className="panel" onSubmit={changePassword}>
               <h2>Change Admin Password</h2>
+              {passwordError && <p className="alert error">{passwordError}</p>}
               <div className="grid">
                 <label>
                   Current Password
-                  <input
-                    type="password"
-                    value={passwordForm.current}
-                    onChange={(e) =>
-                      setPasswordForm({ ...passwordForm, current: e.target.value })
-                    }
-                    required
-                  />
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.current}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, current: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </label>
                 <label>
                   New Password
-                  <input
-                    type="password"
-                    value={passwordForm.next}
-                    onChange={(e) =>
-                      setPasswordForm({ ...passwordForm, next: e.target.value })
-                    }
-                    required
-                  />
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.next}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, next: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </label>
                 <label>
                   Confirm New Password
-                  <input
-                    type="password"
-                    value={passwordForm.confirm}
-                    onChange={(e) =>
-                      setPasswordForm({ ...passwordForm, confirm: e.target.value })
-                    }
-                    required
-                  />
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.confirm}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, confirm: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </label>
               </div>
               <button type="submit">Update Password</button>
@@ -2040,6 +2326,85 @@ export default function App() {
           </section>
         )}
 
+        {user.role === 'employee' && active === 'employee-payslips' && (
+          <section>
+            <div className="section-header">
+              <h1>My Payslips</h1>
+              <p>Request a payslip and download when it is generated.</p>
+            </div>
+
+            <form className="panel" onSubmit={requestPayslip}>
+              <div className="grid">
+                <label>
+                  Month
+                  <input
+                    type="month"
+                    value={employeePayslipRequestMonth}
+                    onChange={(e) => setEmployeePayslipRequestMonth(e.target.value)}
+                    required
+                  />
+                </label>
+              </div>
+              <button type="submit">Request Payslip</button>
+            </form>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>My Requests</h2>
+                  <p className="muted">Track the status of your payslip requests.</p>
+                </div>
+                <button type="button" className="ghost" onClick={refreshEmployeePayslips}>
+                  Refresh
+                </button>
+              </div>
+              <div className="table">
+                <div className="table-header cols-3">
+                  <span>Month</span>
+                  <span>Status</span>
+                  <span>Requested</span>
+                </div>
+                {employeePayslipRequests.map((entry) => (
+                  <div className="table-row cols-3" key={entry.id}>
+                    <span>{entry.month}</span>
+                    <span>{entry.status}</span>
+                    <span>{entry.created_at || '-'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>My Payslips</h2>
+                  <p className="muted">Download generated payslips.</p>
+                </div>
+              </div>
+              <div className="table">
+                <div className="table-header cols-4">
+                  <span>Month</span>
+                  <span>Net Pay</span>
+                  <span>Generated</span>
+                  <span>Actions</span>
+                </div>
+                {employeePayslips.map((entry) => (
+                  <div className="table-row cols-4" key={entry.id}>
+                    <span>{entry.month}</span>
+                    <span>{entry.net_pay}</span>
+                    <span>{entry.generated_on || '-'}</span>
+                    <span className="actions">
+                      <button type="button" onClick={() => downloadEmployeePayslip(entry)}>
+                        Download
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         {user.role === 'employee' && active === 'employee-profile' && (
           <section>
             <div className="section-header">
@@ -2068,32 +2433,77 @@ export default function App() {
                 <p className="value">{employeeProfile?.status || '-'}</p>
               </div>
             </div>
+
+            <form className="panel" onSubmit={changePassword}>
+              <h2>Change Password</h2>
+              {passwordError && <p className="alert error">{passwordError}</p>}
+              <div className="grid">
+                <label>
+                  Current Password
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.current}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, current: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </label>
+                <label>
+                  New Password
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.next}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, next: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </label>
+                <label>
+                  Confirm New Password
+                  <div className="input-row">
+                    <input
+                      type={showPasswordFields ? 'text' : 'password'}
+                      value={passwordForm.confirm}
+                      onChange={(e) =>
+                        setPasswordForm({ ...passwordForm, confirm: e.target.value })
+                      }
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setShowPasswordFields((prev) => !prev)}
+                    >
+                      {showPasswordFields ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </label>
+              </div>
+              <button type="submit">Update Password</button>
+            </form>
           </section>
         )}
       </main>
     </div>
   )
 }
-  async function changePassword(e) {
-    e.preventDefault()
-    setError('')
-
-    if (passwordForm.next.length < 6) {
-      setError('New password must be at least 6 characters.')
-      return
-    }
-    if (passwordForm.next !== passwordForm.confirm) {
-      setError('New password and confirmation do not match.')
-      return
-    }
-
-    await authedFetchAuth('/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({
-        currentPassword: passwordForm.current,
-        newPassword: passwordForm.next,
-      }),
-    })
-
-    setPasswordForm({ current: '', next: '', confirm: '' })
-  }
