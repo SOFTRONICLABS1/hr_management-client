@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api'
+const API_BASE_AUTH = import.meta.env.VITE_API_BASE_AUTH || 'http://localhost:3000/api'
+const API_BASE_HR = import.meta.env.VITE_API_BASE_HR || 'http://localhost:3001/api'
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'employees', label: 'Employees' },
   { key: 'attendance', label: 'Attendance' },
   { key: 'leave', label: 'Leave' },
+  { key: 'payslips', label: 'Payslips' },
   { key: 'settings', label: 'Settings' },
 ]
 
-function useAuthedFetch(onUnauthorized) {
+function useAuthedFetch(onUnauthorized, baseUrl) {
   return async (path, options = {}) => {
     const token = localStorage.getItem('token')
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -38,6 +40,9 @@ function useAuthedFetch(onUnauthorized) {
   }
 }
 
+const sanitizeIntInput = (value) => String(value || '').replace(/[^0-9]/g, '')
+const hasNonDigits = (value) => /[^0-9]/.test(String(value || ''))
+
 export default function App() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -54,6 +59,7 @@ export default function App() {
   const [employees, setEmployees] = useState([])
   const [attendance, setAttendance] = useState([])
   const [leaveRequests, setLeaveRequests] = useState([])
+  const [payslips, setPayslips] = useState([])
   const [settings, setSettings] = useState({
     companyName: '',
     timezone: '',
@@ -63,7 +69,7 @@ export default function App() {
   const [employeeAttendance, setEmployeeAttendance] = useState([])
   const [employeeLeave, setEmployeeLeave] = useState([])
 
-  const [employeeForm, setEmployeeForm] = useState({
+  const defaultEmployeeForm = {
     name: '',
     email: '',
     role: '',
@@ -78,7 +84,9 @@ export default function App() {
     },
     search: '',
     statusFilter: 'All',
-  })
+  }
+
+  const [employeeForm, setEmployeeForm] = useState(defaultEmployeeForm)
 
   const [attendanceForm, setAttendanceForm] = useState({
     employee_id: '',
@@ -90,28 +98,186 @@ export default function App() {
     employee_id: '',
     start_date: '',
     end_date: '',
+    subject: '',
+    description: '',
     reason: '',
     status: 'Pending',
   })
 
+  const defaultPayslipForm = {
+    employee_id: '',
+    month: '',
+    name: '',
+    employee_no: '',
+    no_of_days_pay: '',
+    location: '',
+    no_of_days_in_month: '',
+    bank: '',
+    location_india_days: '',
+    bank_ac_no: '',
+    lop: '',
+    employee_pan: '',
+    employer_pan: '',
+    employer_tan: '',
+    leaves: '',
+    role: '',
+    role_designation: '',
+    basic_salary: '',
+    income_tax: '',
+    house_rent_allowance: '',
+    professional_tax: '',
+    conveyance_allowance: '',
+    medical_allowance: '',
+    special_allowance: '',
+    total_income: '',
+    total_deductions: '',
+    net_pay: '',
+    information: '',
+    generated_on: '',
+  }
+
+  const [payslipForm, setPayslipForm] = useState(defaultPayslipForm)
+  const [payslipErrors, setPayslipErrors] = useState({})
+
   const [editingEmployee, setEditingEmployee] = useState(null)
   const [editingAttendance, setEditingAttendance] = useState(null)
   const [editingLeave, setEditingLeave] = useState(null)
+  const [editingPayslip, setEditingPayslip] = useState(null)
+  const [showTempPassword, setShowTempPassword] = useState(false)
+  const [usePrevMonth, setUsePrevMonth] = useState(false)
+  const [prevMonthNotice, setPrevMonthNotice] = useState('')
+
+  const handleNumericChange = (field, value) => {
+    const clean = sanitizeIntInput(value)
+    setPayslipForm((prev) => ({ ...prev, [field]: clean }))
+    setPayslipErrors((prev) => ({
+      ...prev,
+      [field]: hasNonDigits(value) ? 'Enter only numbers' : '',
+    }))
+  }
+
+  const getPreviousMonthKey = (value) => {
+    if (!value || !/^\d{4}-\d{2}$/.test(value)) return ''
+    const [yearStr, monthStr] = value.split('-')
+    const year = Number(yearStr)
+    const month = Number(monthStr)
+    if (!year || !month) return ''
+    const prevMonth = month === 1 ? 12 : month - 1
+    const prevYear = month === 1 ? year - 1 : year
+    return `${prevYear}-${String(prevMonth).padStart(2, '0')}`
+  }
+
+  const formatMonthLabel = (value) => {
+    if (!value || !/^\d{4}-\d{2}$/.test(value)) return ''
+    const [yearStr, monthStr] = value.split('-')
+    const year = Number(yearStr)
+    const month = Number(monthStr)
+    if (!year || !month) return ''
+    const date = new Date(year, month - 1, 1)
+    return date.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  }
+
+  const getPrevMonthCandidates = (value) => {
+    const prevKey = getPreviousMonthKey(value)
+    const prevLabel = formatMonthLabel(prevKey)
+    return [prevKey, prevLabel].filter(Boolean)
+  }
 
   const employeeOptions = useMemo(() => employees, [employees])
+  const employeeStats = useMemo(() => {
+    const total = employees.length
+    const active = employees.filter((item) => item.status === 'Active').length
+    const onboarding = employees.filter((item) => item.status === 'Onboarding').length
+    const inactive = employees.filter((item) => item.status === 'Inactive').length
+    return { total, active, onboarding, inactive }
+  }, [employees])
 
-  const authedFetch = useAuthedFetch(() => {
+  const filteredEmployees = useMemo(() => {
+    const query = (employeeForm.search || '').toLowerCase()
+    const statusFilter = employeeForm.statusFilter || 'All'
+    return employees.filter((employee) => {
+      const matchesQuery =
+        !query ||
+        employee.name.toLowerCase().includes(query) ||
+        employee.email.toLowerCase().includes(query)
+      const matchesStatus = statusFilter === 'All' || employee.status === statusFilter
+      return matchesQuery && matchesStatus
+    })
+  }, [employees, employeeForm.search, employeeForm.statusFilter])
+
+  const payslipTotals = useMemo(() => {
+    const toNumber = (value) => (value === '' ? 0 : Number(value) || 0)
+    const totalIncome =
+      toNumber(payslipForm.basic_salary) +
+      toNumber(payslipForm.house_rent_allowance) +
+      toNumber(payslipForm.conveyance_allowance) +
+      toNumber(payslipForm.medical_allowance) +
+      toNumber(payslipForm.special_allowance)
+    const totalDeductions =
+      toNumber(payslipForm.income_tax) + toNumber(payslipForm.professional_tax)
+    const netPay = totalIncome - totalDeductions
+    return {
+      totalIncome: totalIncome ? String(totalIncome) : '0',
+      totalDeductions: totalDeductions ? String(totalDeductions) : '0',
+      netPay: netPay ? String(netPay) : '0',
+    }
+  }, [
+    payslipForm.basic_salary,
+    payslipForm.house_rent_allowance,
+    payslipForm.conveyance_allowance,
+    payslipForm.medical_allowance,
+    payslipForm.special_allowance,
+    payslipForm.income_tax,
+    payslipForm.professional_tax,
+  ])
+
+  useEffect(() => {
+    setPayslipForm((prev) => {
+      const next = {
+        ...prev,
+        total_income: payslipTotals.totalIncome,
+        total_deductions: payslipTotals.totalDeductions,
+        net_pay: payslipTotals.netPay,
+      }
+      if (
+        prev.total_income === next.total_income &&
+        prev.total_deductions === next.total_deductions &&
+        prev.net_pay === next.net_pay
+      ) {
+        return prev
+      }
+      return next
+    })
+  }, [payslipTotals])
+
+  const authedFetchAuth = useAuthedFetch(() => {
     localStorage.removeItem('token')
     setUser(null)
-  })
+  }, API_BASE_AUTH)
 
-  const userPermissions = user?.permissions || {}
+  const authedFetchHR = useAuthedFetch(() => {
+    localStorage.removeItem('token')
+    setUser(null)
+  }, API_BASE_HR)
+
+  const defaultEmployeePermissions = {
+    attendance_view: true,
+    leave_apply: true,
+    profile_view: true,
+  }
+  const userPermissions =
+    user?.permissions || (user?.role === 'employee' ? defaultEmployeePermissions : {})
+
+  const refreshLeaveRequests = async () => {
+    const data = await authedFetchHR('/leave')
+    setLeaveRequests(data)
+  }
 
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (!token) return
 
-    authedFetch('/auth/me')
+    authedFetchAuth('/auth/me')
       .then((data) => {
         setUser(data.user)
         setActive(data.user.role === 'employee' ? 'employee-dashboard' : 'dashboard')
@@ -124,15 +290,17 @@ export default function App() {
 
     if (user.role === 'admin') {
       Promise.all([
-        authedFetch('/employees'),
-        authedFetch('/attendance'),
-        authedFetch('/leave'),
-        authedFetch('/settings'),
+        authedFetchAuth('/employees'),
+        authedFetchHR('/attendance'),
+        authedFetchHR('/leave'),
+        authedFetchAuth('/payslips'),
+        authedFetchAuth('/settings'),
       ])
-        .then(([employeesData, attendanceData, leaveData, settingsData]) => {
+        .then(([employeesData, attendanceData, leaveData, payslipsData, settingsData]) => {
           setEmployees(employeesData)
           setAttendance(attendanceData)
           setLeaveRequests(leaveData)
+          setPayslips(payslipsData)
           setSettings({
             companyName: settingsData.companyName || '',
             timezone: settingsData.timezone || '',
@@ -142,11 +310,11 @@ export default function App() {
         .catch(() => {})
     } else if (user.role === 'employee') {
       const tasks = []
-      if (userPermissions.profile_view) tasks.push(authedFetch('/employee/me'))
+      if (userPermissions.profile_view) tasks.push(authedFetchHR('/employee/me'))
       else tasks.push(Promise.resolve(null))
-      if (userPermissions.attendance_view) tasks.push(authedFetch('/employee/attendance'))
+      if (userPermissions.attendance_view) tasks.push(authedFetchHR('/employee/attendance'))
       else tasks.push(Promise.resolve([]))
-      if (userPermissions.leave_apply) tasks.push(authedFetch('/employee/leave'))
+      if (userPermissions.leave_apply) tasks.push(authedFetchHR('/employee/leave'))
       else tasks.push(Promise.resolve([]))
 
       Promise.all(tasks)
@@ -158,6 +326,13 @@ export default function App() {
         .catch(() => {})
     }
   }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    if (user.role !== 'admin') return
+    if (active !== 'leave') return
+    refreshLeaveRequests().catch(() => {})
+  }, [active, user])
 
   useEffect(() => {
     if (!user) return
@@ -175,7 +350,7 @@ export default function App() {
     setError('')
 
     try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
+      const res = await fetch(`${API_BASE_AUTH}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -204,6 +379,16 @@ export default function App() {
     setPassword('')
   }
 
+  function resetEmployeeForm({ keepFilters } = { keepFilters: true }) {
+    setEmployeeForm((prev) => ({
+      ...defaultEmployeeForm,
+      search: keepFilters ? prev.search : defaultEmployeeForm.search,
+      statusFilter: keepFilters ? prev.statusFilter : defaultEmployeeForm.statusFilter,
+    }))
+    setEditingEmployee(null)
+    setShowTempPassword(false)
+  }
+
   async function upsertEmployee(e) {
     e.preventDefault()
 
@@ -221,7 +406,7 @@ export default function App() {
         return
       }
 
-      const created = await authedFetch('/employees', {
+      const created = await authedFetchAuth('/employees', {
         method: 'POST',
         body: JSON.stringify({
           name: employeeForm.name,
@@ -237,7 +422,7 @@ export default function App() {
 
       setEmployees((prev) => [created, ...prev])
     } else {
-      const updated = await authedFetch(`/employees?id=${editingEmployee.id}`, {
+      const updated = await authedFetchAuth(`/employees?id=${editingEmployee.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           name: employeeForm.name,
@@ -253,27 +438,12 @@ export default function App() {
       setEditingEmployee(null)
     }
 
-    setEmployeeForm({
-      name: '',
-      email: '',
-      role: '',
-      department: '',
-      status: 'Active',
-      username: '',
-      tempPassword: '',
-      permissions: {
-        attendance_view: true,
-        leave_apply: true,
-        profile_view: true,
-      },
-      search: employeeForm.search,
-      statusFilter: employeeForm.statusFilter,
-    })
+    resetEmployeeForm({ keepFilters: true })
   }
 
   function editEmployee(employee) {
     setEditingEmployee(employee)
-    setEmployeeForm({
+    setEmployeeForm((prev) => ({
       name: employee.name,
       email: employee.email,
       role: employee.role,
@@ -286,12 +456,206 @@ export default function App() {
         leave_apply: true,
         profile_view: true,
       },
-    })
+      search: prev.search,
+      statusFilter: prev.statusFilter,
+    }))
+    setShowTempPassword(false)
+  }
+
+  function generateTempPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$'
+    let value = ''
+    for (let i = 0; i < 10; i += 1) {
+      value += chars[Math.floor(Math.random() * chars.length)]
+    }
+    setEmployeeForm((prev) => ({ ...prev, tempPassword: value }))
   }
 
   async function deleteEmployee(id) {
-    await authedFetch(`/employees?id=${id}`, { method: 'DELETE' })
+    await authedFetchAuth(`/employees?id=${id}`, { method: 'DELETE' })
     setEmployees((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  function resetPayslipForm() {
+    setPayslipForm(defaultPayslipForm)
+    setPayslipErrors({})
+    setEditingPayslip(null)
+    setUsePrevMonth(false)
+    setPrevMonthNotice('')
+  }
+
+  function handlePayslipEmployeeChange(employeeId) {
+    const selected = employees.find((item) => String(item.id) === String(employeeId))
+    setPayslipForm((prev) => ({
+      ...prev,
+      employee_id: employeeId,
+      name: selected?.name || prev.name,
+      role: selected?.role || prev.role,
+      role_designation: selected?.department || prev.role_designation,
+    }))
+  }
+
+  useEffect(() => {
+    if (!usePrevMonth) return
+    if (!payslipForm.employee_id || !payslipForm.month) return
+    const candidates = getPrevMonthCandidates(payslipForm.month)
+    if (!candidates.length) return
+    const prevPayslip = payslips.find(
+      (item) =>
+        String(item.employee_id) === String(payslipForm.employee_id) &&
+        candidates.includes(String(item.month)),
+    )
+    if (!prevPayslip) {
+      setPrevMonthNotice('No previous month payslip found for this employee.')
+      return
+    }
+    setPrevMonthNotice('')
+    setPayslipForm((prev) => ({
+      ...prev,
+      name: prevPayslip.name ?? '',
+      employee_no: prevPayslip.employee_no ?? '',
+      no_of_days_pay: prevPayslip.no_of_days_pay ?? '',
+      location: prevPayslip.location ?? '',
+      no_of_days_in_month: prevPayslip.no_of_days_in_month ?? '',
+      bank: prevPayslip.bank ?? '',
+      location_india_days: prevPayslip.location_india_days ?? '',
+      bank_ac_no: prevPayslip.bank_ac_no ?? '',
+      lop: prevPayslip.lop ?? '',
+      employee_pan: prevPayslip.employee_pan ?? '',
+      employer_pan: prevPayslip.employer_pan ?? '',
+      employer_tan: prevPayslip.employer_tan ?? '',
+      leaves: prevPayslip.leaves ?? '',
+      role: prevPayslip.role ?? '',
+      role_designation: prevPayslip.role_designation ?? '',
+      basic_salary: prevPayslip.basic_salary ?? '',
+      income_tax: prevPayslip.income_tax ?? '',
+      house_rent_allowance: prevPayslip.house_rent_allowance ?? '',
+      professional_tax: prevPayslip.professional_tax ?? '',
+      conveyance_allowance: prevPayslip.conveyance_allowance ?? '',
+      medical_allowance: prevPayslip.medical_allowance ?? '',
+      special_allowance: prevPayslip.special_allowance ?? '',
+      total_income: prevPayslip.total_income ?? '',
+      total_deductions: prevPayslip.total_deductions ?? '',
+      net_pay: prevPayslip.net_pay ?? '',
+      information: prevPayslip.information ?? '',
+      generated_on: prevPayslip.generated_on ?? '',
+    }))
+  }, [usePrevMonth, payslipForm.employee_id, payslipForm.month, payslips])
+
+  function editPayslip(entry) {
+    setEditingPayslip(entry)
+    setPayslipForm({
+      employee_id: entry.employee_id || '',
+      month: entry.month || '',
+      name: entry.name || '',
+      employee_no: entry.employee_no || '',
+      no_of_days_pay: entry.no_of_days_pay || '',
+      location: entry.location || '',
+      no_of_days_in_month: entry.no_of_days_in_month || '',
+      bank: entry.bank || '',
+      location_india_days: entry.location_india_days || '',
+      bank_ac_no: entry.bank_ac_no || '',
+      lop: entry.lop || '',
+      employee_pan: entry.employee_pan || '',
+      employer_pan: entry.employer_pan || '',
+      employer_tan: entry.employer_tan || '',
+      leaves: entry.leaves || '',
+      role: entry.role || '',
+      role_designation: entry.role_designation || '',
+      basic_salary: entry.basic_salary ?? '',
+      income_tax: entry.income_tax ?? '',
+      house_rent_allowance: entry.house_rent_allowance ?? '',
+      professional_tax: entry.professional_tax ?? '',
+      conveyance_allowance: entry.conveyance_allowance ?? '',
+      medical_allowance: entry.medical_allowance ?? '',
+      special_allowance: entry.special_allowance ?? '',
+      total_income: entry.total_income ?? '',
+      total_deductions: entry.total_deductions ?? '',
+      net_pay: entry.net_pay ?? '',
+      information: entry.information || '',
+      generated_on: entry.generated_on || '',
+    })
+  }
+
+  async function deletePayslip(id) {
+    await authedFetchAuth(`/payslips/${id}`, { method: 'DELETE' })
+    setPayslips((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  async function downloadPayslip(entry) {
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${API_BASE_AUTH}/payslips/${entry.id}/pdf`, {
+      headers: { Authorization: token ? `Bearer ${token}` : '' },
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.message || 'Failed to download payslip.')
+    }
+
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const safeName = (entry.name || 'Employee').replace(/[^a-z0-9-_]/gi, '_')
+    const safeMonth = (entry.month || 'Payslip').replace(/[^a-z0-9-_]/gi, '_')
+    link.href = url
+    link.download = `Payslip-${safeName}-${safeMonth}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  }
+
+  async function upsertPayslip(e) {
+    e.preventDefault()
+    setError('')
+
+    const hasNumericErrors = Object.values(payslipErrors).some(Boolean)
+    if (hasNumericErrors) {
+      setError('Please enter only numbers in the highlighted fields.')
+      return
+    }
+
+    if (!payslipForm.employee_id || !payslipForm.month) {
+      setError('Employee and month are required.')
+      return
+    }
+
+    const toNumberOrNull = (value) => {
+      if (value === '' || value === null || value === undefined) return null
+      const num = Number(value)
+      return Number.isNaN(num) ? null : num
+    }
+
+    const payload = {
+      ...payslipForm,
+      basic_salary: toNumberOrNull(payslipForm.basic_salary),
+      income_tax: toNumberOrNull(payslipForm.income_tax),
+      house_rent_allowance: toNumberOrNull(payslipForm.house_rent_allowance),
+      professional_tax: toNumberOrNull(payslipForm.professional_tax),
+      conveyance_allowance: toNumberOrNull(payslipForm.conveyance_allowance),
+      medical_allowance: toNumberOrNull(payslipForm.medical_allowance),
+      special_allowance: toNumberOrNull(payslipForm.special_allowance),
+      total_income: toNumberOrNull(payslipForm.total_income),
+      total_deductions: toNumberOrNull(payslipForm.total_deductions),
+      net_pay: toNumberOrNull(payslipForm.net_pay),
+    }
+
+    if (editingPayslip) {
+      const updated = await authedFetchAuth(`/payslips/${editingPayslip.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      setPayslips((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      resetPayslipForm()
+    } else {
+      const created = await authedFetchAuth('/payslips', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      setPayslips((prev) => [created, ...prev])
+      resetPayslipForm()
+    }
   }
 
   async function upsertAttendance(e) {
@@ -299,7 +663,7 @@ export default function App() {
     const employee = employees.find((item) => item.id === attendanceForm.employee_id)
 
     if (editingAttendance) {
-      const updated = await authedFetch(`/attendance?id=${editingAttendance.id}`, {
+      const updated = await authedFetchHR(`/attendance?id=${editingAttendance.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           employee_id: attendanceForm.employee_id,
@@ -312,7 +676,7 @@ export default function App() {
       setAttendance((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingAttendance(null)
     } else {
-      const created = await authedFetch('/attendance', {
+      const created = await authedFetchHR('/attendance', {
         method: 'POST',
         body: JSON.stringify({
           employee_id: attendanceForm.employee_id,
@@ -338,7 +702,7 @@ export default function App() {
   }
 
   async function deleteAttendance(id) {
-    await authedFetch(`/attendance?id=${id}`, { method: 'DELETE' })
+    await authedFetchHR(`/attendance?id=${id}`, { method: 'DELETE' })
     setAttendance((prev) => prev.filter((item) => item.id !== id))
   }
 
@@ -347,14 +711,16 @@ export default function App() {
     const employee = employees.find((item) => item.id === leaveForm.employee_id)
 
     if (editingLeave) {
-      const updated = await authedFetch(`/leave?id=${editingLeave.id}`, {
+      const updated = await authedFetchHR(`/leave/${editingLeave.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           employee_id: leaveForm.employee_id,
           employee_name: employee?.name || '',
           start_date: leaveForm.start_date,
           end_date: leaveForm.end_date,
-          reason: leaveForm.reason,
+          subject: leaveForm.subject,
+          description: leaveForm.description,
+          reason: leaveForm.description || leaveForm.reason,
           status: leaveForm.status,
         }),
       })
@@ -362,14 +728,16 @@ export default function App() {
       setLeaveRequests((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingLeave(null)
     } else {
-      const created = await authedFetch('/leave', {
+      const created = await authedFetchHR('/leave', {
         method: 'POST',
         body: JSON.stringify({
           employee_id: leaveForm.employee_id,
           employee_name: employee?.name || '',
           start_date: leaveForm.start_date,
           end_date: leaveForm.end_date,
-          reason: leaveForm.reason,
+          subject: leaveForm.subject,
+          description: leaveForm.description,
+          reason: leaveForm.description || leaveForm.reason,
           status: leaveForm.status,
         }),
       })
@@ -377,7 +745,15 @@ export default function App() {
       setLeaveRequests((prev) => [created, ...prev])
     }
 
-    setLeaveForm({ employee_id: '', start_date: '', end_date: '', reason: '', status: 'Pending' })
+    setLeaveForm({
+      employee_id: '',
+      start_date: '',
+      end_date: '',
+      subject: '',
+      description: '',
+      reason: '',
+      status: 'Pending',
+    })
   }
 
   function editLeave(entry) {
@@ -386,19 +762,21 @@ export default function App() {
       employee_id: entry.employee_id,
       start_date: entry.start_date,
       end_date: entry.end_date,
-      reason: entry.reason,
+      subject: entry.subject || '',
+      description: entry.description || entry.reason || '',
+      reason: entry.reason || '',
       status: entry.status,
     })
   }
 
   async function deleteLeave(id) {
-    await authedFetch(`/leave?id=${id}`, { method: 'DELETE' })
+    await authedFetchHR(`/leave/${id}`, { method: 'DELETE' })
     setLeaveRequests((prev) => prev.filter((item) => item.id !== id))
   }
 
   async function saveSettings(e) {
     e.preventDefault()
-    await authedFetch('/settings', {
+    await authedFetchAuth('/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
     })
@@ -406,21 +784,31 @@ export default function App() {
 
   async function applyLeave(e) {
     e.preventDefault()
-    const created = await authedFetch('/employee/leave', {
+    const created = await authedFetchHR('/employee/leave', {
       method: 'POST',
       body: JSON.stringify({
         start_date: leaveForm.start_date,
         end_date: leaveForm.end_date,
-        reason: leaveForm.reason,
+        subject: leaveForm.subject,
+        description: leaveForm.description,
+        reason: leaveForm.description || leaveForm.reason,
       }),
     })
 
     setEmployeeLeave((prev) => [created, ...prev])
-    setLeaveForm({ employee_id: '', start_date: '', end_date: '', reason: '', status: 'Pending' })
+    setLeaveForm({
+      employee_id: '',
+      start_date: '',
+      end_date: '',
+      subject: '',
+      description: '',
+      reason: '',
+      status: 'Pending',
+    })
   }
 
   async function deleteEmployeeLeave(id) {
-    await authedFetch(`/employee/leave?id=${id}`, { method: 'DELETE' })
+    await authedFetchHR(`/employee/leave?id=${id}`, { method: 'DELETE' })
     setEmployeeLeave((prev) => prev.filter((item) => item.id !== id))
   }
 
@@ -573,194 +961,300 @@ export default function App() {
 
         {user.role === 'admin' && active === 'employees' && (
           <section>
-            <div className="section-header">
-              <h1>Employees</h1>
-              <p>Create and manage employee profiles.</p>
+            <div className="section-header spread">
+              <div>
+                <h1>Employees</h1>
+                <p>Create, manage, and support your team from one place.</p>
+              </div>
+              <div className="header-actions">
+                {editingEmployee && (
+                  <span className="pill subtle">Editing {employeeForm.name || 'employee'}</span>
+                )}
+                <button type="button" className="ghost" onClick={() => resetEmployeeForm({ keepFilters: true })}>
+                  New Employee
+                </button>
+              </div>
             </div>
 
-            <form className="panel" onSubmit={upsertEmployee}>
-              <div className="grid">
-                <label>
-                  Name
-                  <input
-                    type="text"
-                    value={employeeForm.name}
-                    onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
-                    required
-                  />
-                </label>
-                <label>
-                  Email
-                  <input
-                    type="email"
-                    value={employeeForm.email}
-                    onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
-                    required
-                  />
-                </label>
-                <label>
-                  Role
-                  <input
-                    type="text"
-                    value={employeeForm.role}
-                    onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
-                    required
-                  />
-                </label>
-                <label>
-                  Department
-                  <input
-                    type="text"
-                    value={employeeForm.department}
-                    onChange={(e) => setEmployeeForm({ ...employeeForm, department: e.target.value })}
-                    required
-                  />
-                </label>
-                <label>
-                  Status
-                  <select
-                    value={employeeForm.status}
-                    onChange={(e) => setEmployeeForm({ ...employeeForm, status: e.target.value })}
-                  >
-                    <option>Active</option>
-                    <option>Onboarding</option>
-                    <option>Inactive</option>
-                  </select>
-                </label>
-                {!editingEmployee && (
-                  <>
+            <div className="employee-stats">
+              <div className="stat-card">
+                <p className="label">Total</p>
+                <p className="value">{employeeStats.total}</p>
+              </div>
+              <div className="stat-card">
+                <p className="label">Active</p>
+                <p className="value">{employeeStats.active}</p>
+              </div>
+              <div className="stat-card">
+                <p className="label">Onboarding</p>
+                <p className="value">{employeeStats.onboarding}</p>
+              </div>
+              <div className="stat-card">
+                <p className="label">Inactive</p>
+                <p className="value">{employeeStats.inactive}</p>
+              </div>
+            </div>
+
+            <div className="employee-page">
+              <div className="employee-form-wrap">
+                <form className="panel employee-form" onSubmit={upsertEmployee}>
+                  <div className="panel-header">
+                    <div>
+                      <h2>{editingEmployee ? 'Edit Employee' : 'Add Employee'}</h2>
+                      <p className="muted">
+                        {editingEmployee
+                          ? 'Update profile details and permissions.'
+                          : 'Create a new profile with login access and permissions.'}
+                      </p>
+                    </div>
+                    {editingEmployee && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => resetEmployeeForm({ keepFilters: true })}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                <div className="grid">
+                  <label>
+                    Name
+                    <input
+                      type="text"
+                        value={employeeForm.name}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
+                        required
+                      />
+                    </label>
                     <label>
-                      Username
+                      Email
+                      <input
+                        type="email"
+                        value={employeeForm.email}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Role
                       <input
                         type="text"
-                        value={employeeForm.username}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, username: e.target.value })}
+                        value={employeeForm.role}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
                         required
                       />
                     </label>
                     <label>
-                      Temp Password
+                      Department
                       <input
-                        type="password"
-                        value={employeeForm.tempPassword}
-                        onChange={(e) =>
-                          setEmployeeForm({ ...employeeForm, tempPassword: e.target.value })
-                        }
+                        type="text"
+                        value={employeeForm.department}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, department: e.target.value })}
                         required
                       />
                     </label>
-                  </>
-                )}
-                <label>
-                  Permissions
-                  <div className="checkbox-group">
-                    <label className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={employeeForm.permissions.attendance_view}
-                        onChange={(e) =>
-                          setEmployeeForm({
-                            ...employeeForm,
-                            permissions: {
-                              ...employeeForm.permissions,
-                              attendance_view: e.target.checked,
-                            },
-                          })
-                        }
-                      />
-                      View Attendance
+                    <label>
+                      Status
+                      <select
+                        value={employeeForm.status}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, status: e.target.value })}
+                      >
+                        <option>Active</option>
+                        <option>Onboarding</option>
+                        <option>Inactive</option>
+                      </select>
                     </label>
-                    <label className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={employeeForm.permissions.leave_apply}
-                        onChange={(e) =>
-                          setEmployeeForm({
-                            ...employeeForm,
-                            permissions: {
-                              ...employeeForm.permissions,
-                              leave_apply: e.target.checked,
-                            },
-                          })
-                        }
-                      />
-                      Apply Leave
-                    </label>
-                    <label className="checkbox">
-                      <input
-                        type="checkbox"
-                        checked={employeeForm.permissions.profile_view}
-                        onChange={(e) =>
-                          setEmployeeForm({
-                            ...employeeForm,
-                            permissions: {
-                              ...employeeForm.permissions,
-                              profile_view: e.target.checked,
-                            },
-                          })
-                        }
-                      />
-                      View Profile
+                  {!editingEmployee && (
+                    <>
+                      <label>
+                        Username
+                        <input
+                          type="text"
+                          value={employeeForm.username}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, username: e.target.value })
+                          }
+                          required
+                        />
+                        <span className="field-hint">Used to sign in. Keep it short and unique.</span>
+                      </label>
+                      <label>
+                        Temp Password
+                        <div className="input-row">
+                          <input
+                            type={showTempPassword ? 'text' : 'password'}
+                            value={employeeForm.tempPassword}
+                            onChange={(e) =>
+                              setEmployeeForm({ ...employeeForm, tempPassword: e.target.value })
+                            }
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => setShowTempPassword((prev) => !prev)}
+                          >
+                            {showTempPassword ? 'Hide' : 'Show'}
+                          </button>
+                          <button type="button" className="secondary" onClick={generateTempPassword}>
+                            Generate
+                          </button>
+                        </div>
+                        <span className="field-hint">
+                          Share this once. The employee should change it after first login.
+                        </span>
+                      </label>
+                    </>
+                  )}
+                    <label>
+                      Permissions
+                      <div className="toggle-group">
+                        <label className="toggle">
+                          <span>View Attendance</span>
+                          <input
+                            type="checkbox"
+                            checked={employeeForm.permissions.attendance_view}
+                            onChange={(e) =>
+                              setEmployeeForm({
+                                ...employeeForm,
+                                permissions: {
+                                  ...employeeForm.permissions,
+                                  attendance_view: e.target.checked,
+                                },
+                              })
+                            }
+                          />
+                          <span className="toggle-track" aria-hidden="true" />
+                        </label>
+                        <label className="toggle">
+                          <span>Apply Leave</span>
+                          <input
+                            type="checkbox"
+                            checked={employeeForm.permissions.leave_apply}
+                            onChange={(e) =>
+                              setEmployeeForm({
+                                ...employeeForm,
+                                permissions: {
+                                  ...employeeForm.permissions,
+                                  leave_apply: e.target.checked,
+                                },
+                              })
+                            }
+                          />
+                          <span className="toggle-track" aria-hidden="true" />
+                        </label>
+                        <label className="toggle">
+                          <span>View Profile</span>
+                          <input
+                            type="checkbox"
+                            checked={employeeForm.permissions.profile_view}
+                            onChange={(e) =>
+                              setEmployeeForm({
+                                ...employeeForm,
+                                permissions: {
+                                  ...employeeForm.permissions,
+                                  profile_view: e.target.checked,
+                                },
+                              })
+                            }
+                          />
+                          <span className="toggle-track" aria-hidden="true" />
+                        </label>
+                      </div>
                     </label>
                   </div>
-                </label>
-              </div>
-              <button type="submit">{editingEmployee ? 'Update Employee' : 'Add Employee'}</button>
-            </form>
 
-            <div className="filters">
-              <input
-                type="text"
-                placeholder="Search by name or email"
-                value={employeeForm.search || ''}
-                onChange={(e) => setEmployeeForm({ ...employeeForm, search: e.target.value })}
-              />
-              <select
-                value={employeeForm.statusFilter || 'All'}
-                onChange={(e) => setEmployeeForm({ ...employeeForm, statusFilter: e.target.value })}
-              >
-                <option>All</option>
-                <option>Active</option>
-                <option>Onboarding</option>
-                <option>Inactive</option>
-              </select>
-            </div>
-
-            <div className="table">
-              <div className="table-header">
-                <span>Name</span>
-                <span>Email</span>
-                <span>Role</span>
-                <span>Department</span>
-                <span>Status</span>
-                <span>Actions</span>
-              </div>
-              {employees
-                .filter((employee) => {
-                  const query = (employeeForm.search || '').toLowerCase()
-                  const matchesQuery =
-                    !query ||
-                    employee.name.toLowerCase().includes(query) ||
-                    employee.email.toLowerCase().includes(query)
-                  const statusFilter = employeeForm.statusFilter || 'All'
-                  const matchesStatus = statusFilter === 'All' || employee.status === statusFilter
-                  return matchesQuery && matchesStatus
-                })
-                .map((employee) => (
-                <div className="table-row" key={employee.id}>
-                  <span>{employee.name}</span>
-                  <span>{employee.email}</span>
-                  <span>{employee.role}</span>
-                  <span>{employee.department}</span>
-                  <span>{employee.status}</span>
-                  <span className="actions">
-                    <button type="button" onClick={() => editEmployee(employee)}>Edit</button>
-                    <button type="button" onClick={() => deleteEmployee(employee.id)} className="danger">
-                      Delete
+                  <div className="form-actions">
+                    <button type="submit">
+                      {editingEmployee ? 'Update Employee' : 'Add Employee'}
                     </button>
-                  </span>
+                    {editingEmployee && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => resetEmployeeForm({ keepFilters: true })}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              <div className="employee-list">
+                <div className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <h2>Directory</h2>
+                      <p className="muted">Search and filter employee records.</p>
+                    </div>
+                    <div className="filters compact">
+                      <input
+                        type="text"
+                        placeholder="Search by name or email"
+                        value={employeeForm.search || ''}
+                        onChange={(e) => setEmployeeForm({ ...employeeForm, search: e.target.value })}
+                      />
+                      <select
+                        value={employeeForm.statusFilter || 'All'}
+                        onChange={(e) =>
+                          setEmployeeForm({ ...employeeForm, statusFilter: e.target.value })
+                        }
+                      >
+                        <option>All</option>
+                        <option>Active</option>
+                        <option>Onboarding</option>
+                        <option>Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="table">
+                    <div className="table-header">
+                      <span>Name</span>
+                      <span>Email</span>
+                      <span>Role</span>
+                      <span>Department</span>
+                      <span>Status</span>
+                      <span>Actions</span>
+                    </div>
+                    {filteredEmployees.length === 0 && (
+                      <div className="empty-state">
+                        <p>No employees match the current filters.</p>
+                      </div>
+                    )}
+                    {filteredEmployees.map((employee) => (
+                      <div className="table-row" key={employee.id}>
+                        <span>{employee.name}</span>
+                        <span>{employee.email}</span>
+                        <span>{employee.role}</span>
+                        <span>{employee.department}</span>
+                        <span>
+                          <span
+                            className={`status-badge status-${employee.status.toLowerCase()}`}
+                          >
+                            {employee.status}
+                          </span>
+                        </span>
+                        <span className="actions">
+                          <button type="button" onClick={() => editEmployee(employee)}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteEmployee(employee.id)}
+                            className="danger"
+                          >
+                            Delete
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              </div>
             </div>
           </section>
         )}
@@ -839,9 +1333,14 @@ export default function App() {
 
         {user.role === 'admin' && active === 'leave' && (
           <section>
-            <div className="section-header">
-              <h1>Leave</h1>
-              <p>Manage employee leave requests.</p>
+            <div className="section-header spread">
+              <div>
+                <h1>Leave</h1>
+                <p>Manage employee leave requests.</p>
+              </div>
+              <button type="button" className="ghost" onClick={refreshLeaveRequests}>
+                Refresh
+              </button>
             </div>
 
             <form className="panel" onSubmit={upsertLeave}>
@@ -879,12 +1378,20 @@ export default function App() {
                     required
                   />
                 </label>
-                <label>
-                  Reason
-                  <input
-                    type="text"
-                    value={leaveForm.reason}
-                    onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                <label className="full-span">
+                  Subject
+                  <textarea
+                    className="subject"
+                    value={leaveForm.subject}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, subject: e.target.value })}
+                    required
+                  />
+                </label>
+                <label className="full-span">
+                  Description
+                  <textarea
+                    value={leaveForm.description}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, description: e.target.value })}
                     required
                   />
                 </label>
@@ -903,21 +1410,23 @@ export default function App() {
               <button type="submit">{editingLeave ? 'Update Request' : 'Add Request'}</button>
             </form>
 
-            <div className="table">
-              <div className="table-header cols-5">
+              <div className="table">
+              <div className="table-header cols-6">
                 <span>Employee</span>
                 <span>Dates</span>
-                <span>Reason</span>
+                <span>Subject</span>
+                <span>Description</span>
                 <span>Status</span>
                 <span>Actions</span>
               </div>
               {leaveRequests.map((entry) => (
-                <div className="table-row cols-5" key={entry.id}>
+                <div className="table-row cols-6" key={entry.id}>
                   <span>{entry.employee_name || 'Unknown'}</span>
                   <span>
                     {entry.start_date} → {entry.end_date}
                   </span>
-                  <span>{entry.reason}</span>
+                  <span>{entry.subject || '-'}</span>
+                  <span>{entry.description || entry.reason || '-'}</span>
                   <span>{entry.status}</span>
                   <span className="actions">
                     <button type="button" onClick={() => editLeave(entry)}>Edit</button>
@@ -927,6 +1436,406 @@ export default function App() {
                   </span>
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+        {user.role === 'admin' && active === 'payslips' && (
+          <section>
+            <div className="section-header spread">
+              <div>
+                <h1>Payslip Generator</h1>
+                <p>Create, store, and download salary slips using the official template.</p>
+              </div>
+              <div className="header-actions">
+                {editingPayslip && (
+                  <span className="pill subtle">Editing {payslipForm.name || 'payslip'}</span>
+                )}
+                <button type="button" className="ghost" onClick={resetPayslipForm}>
+                  New Payslip
+                </button>
+              </div>
+            </div>
+
+            <div className="payslip-preview panel">
+              <div className="payslip-preview-overlay">
+                <div>
+                  <p className="label">Preview</p>
+                  <p className="value">{payslipForm.name || 'Employee Name'}</p>
+                  <p className="muted">{payslipForm.month || 'Month / Year'}</p>
+                </div>
+                <div>
+                  <p className="label">Net Pay</p>
+                  <p className="value">₹ {payslipForm.net_pay || '0'}</p>
+                </div>
+              </div>
+            </div>
+
+            <form className="panel payslip-form" onSubmit={upsertPayslip}>
+              <div className="panel-header">
+                <div>
+                  <h2>{editingPayslip ? 'Edit Payslip Details' : 'Add Payslip Details'}</h2>
+                  <p className="muted">Fill in the fields to generate a PDF payslip.</p>
+                </div>
+                {editingPayslip && (
+                  <button type="button" className="ghost" onClick={resetPayslipForm}>
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="grid">
+                <label>
+                  Employee
+                  <select
+                    value={payslipForm.employee_id}
+                    onChange={(e) => handlePayslipEmployeeChange(e.target.value)}
+                    required
+                  >
+                    <option value="">Select employee</option>
+                    {employeeOptions.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Salary Slip Month
+                  <input
+                    type="month"
+                    value={payslipForm.month}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, month: e.target.value })}
+                    required
+                  />
+                </label>
+                <label>
+                  Employee Name
+                  <input
+                    type="text"
+                    value={payslipForm.name}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, name: e.target.value })}
+                    required
+                  />
+                </label>
+                <label>
+                  Employee No
+                  <input
+                    type="text"
+                    value={payslipForm.employee_no}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, employee_no: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Role
+                  <input
+                    type="text"
+                    value={payslipForm.role}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, role: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Role Designation
+                  <input
+                    type="text"
+                    value={payslipForm.role_designation}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, role_designation: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Location
+                  <input
+                    type="text"
+                    value={payslipForm.location}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, location: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Bank
+                  <input
+                    type="text"
+                    value={payslipForm.bank}
+                    onChange={(e) => setPayslipForm({ ...payslipForm, bank: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Bank A/C No
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.bank_ac_no ? 'input-error' : ''}
+                    value={payslipForm.bank_ac_no}
+                    onChange={(e) => handleNumericChange('bank_ac_no', e.target.value)}
+                  />
+                  {payslipErrors.bank_ac_no && (
+                    <p className="field-error">{payslipErrors.bank_ac_no}</p>
+                  )}
+                </label>
+                <label>
+                  No. Of Days - Pay
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.no_of_days_pay ? 'input-error' : ''}
+                    value={payslipForm.no_of_days_pay}
+                    onChange={(e) => handleNumericChange('no_of_days_pay', e.target.value)}
+                  />
+                  {payslipErrors.no_of_days_pay && (
+                    <p className="field-error">{payslipErrors.no_of_days_pay}</p>
+                  )}
+                </label>
+                <label>
+                  No. Of Days in Month
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.no_of_days_in_month ? 'input-error' : ''}
+                    value={payslipForm.no_of_days_in_month}
+                    onChange={(e) => handleNumericChange('no_of_days_in_month', e.target.value)}
+                  />
+                  {payslipErrors.no_of_days_in_month && (
+                    <p className="field-error">{payslipErrors.no_of_days_in_month}</p>
+                  )}
+                </label>
+                <label>
+                  Location India Days
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.location_india_days ? 'input-error' : ''}
+                    value={payslipForm.location_india_days}
+                    onChange={(e) => handleNumericChange('location_india_days', e.target.value)}
+                  />
+                  {payslipErrors.location_india_days && (
+                    <p className="field-error">{payslipErrors.location_india_days}</p>
+                  )}
+                </label>
+                <label>
+                  LOP
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.lop ? 'input-error' : ''}
+                    value={payslipForm.lop}
+                    onChange={(e) => handleNumericChange('lop', e.target.value)}
+                  />
+                  {payslipErrors.lop && <p className="field-error">{payslipErrors.lop}</p>}
+                </label>
+                <label>
+                  Leaves
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className={payslipErrors.leaves ? 'input-error' : ''}
+                    value={payslipForm.leaves}
+                    onChange={(e) => handleNumericChange('leaves', e.target.value)}
+                  />
+                  {payslipErrors.leaves && <p className="field-error">{payslipErrors.leaves}</p>}
+                </label>
+                <label>
+                  Employee PAN
+                  <input
+                    type="text"
+                    value={payslipForm.employee_pan}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, employee_pan: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Employer PAN
+                  <input
+                    type="text"
+                    value={payslipForm.employer_pan}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, employer_pan: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Employer TAN
+                  <input
+                    type="text"
+                    value={payslipForm.employer_tan}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, employer_tan: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Basic Salary
+                  <input
+                    type="number"
+                    value={payslipForm.basic_salary}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, basic_salary: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  House Rent Allowance
+                  <input
+                    type="number"
+                    value={payslipForm.house_rent_allowance}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, house_rent_allowance: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Conveyance Allowance
+                  <input
+                    type="number"
+                    value={payslipForm.conveyance_allowance}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, conveyance_allowance: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Medical Allowance
+                  <input
+                    type="number"
+                    value={payslipForm.medical_allowance}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, medical_allowance: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Special Allowance
+                  <input
+                    type="number"
+                    value={payslipForm.special_allowance}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, special_allowance: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Income Tax
+                  <input
+                    type="number"
+                    value={payslipForm.income_tax}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, income_tax: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Professional Tax
+                  <input
+                    type="number"
+                    value={payslipForm.professional_tax}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, professional_tax: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Total Income
+                  <input type="number" value={payslipForm.total_income} readOnly />
+                </label>
+                <label>
+                  Total Deductions
+                  <input type="number" value={payslipForm.total_deductions} readOnly />
+                </label>
+                <label>
+                  Net Pay
+                  <input type="number" value={payslipForm.net_pay} readOnly />
+                </label>
+                <label>
+                  Generated On
+                  <input
+                    type="date"
+                    value={payslipForm.generated_on}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, generated_on: e.target.value })
+                    }
+                  />
+                </label>
+                <label className="full-span">
+                  Information
+                  <input
+                    type="text"
+                    value={payslipForm.information}
+                    onChange={(e) =>
+                      setPayslipForm({ ...payslipForm, information: e.target.value })
+                    }
+                  />
+                </label>
+                <label className="full-span inline-toggle">
+                  <input
+                    type="checkbox"
+                    checked={usePrevMonth}
+                    onChange={(e) => setUsePrevMonth(e.target.checked)}
+                  />
+                  <span>Use Previous Month Salary (auto-fills salary fields)</span>
+                </label>
+                {usePrevMonth && prevMonthNotice && (
+                  <p className="field-error full-span">{prevMonthNotice}</p>
+                )}
+              </div>
+
+              <div className="form-actions">
+                <button type="submit">
+                  {editingPayslip ? 'Update Payslip' : 'Save Payslip'}
+                </button>
+                {editingPayslip && (
+                  <button type="button" className="secondary" onClick={resetPayslipForm}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Saved Payslips</h2>
+                  <p className="muted">Download the PDF using the original background.</p>
+                </div>
+              </div>
+              <div className="table">
+                <div className="table-header cols-5">
+                  <span>Employee</span>
+                  <span>Month</span>
+                  <span>Net Pay</span>
+                  <span>Generated</span>
+                  <span>Actions</span>
+                </div>
+                {payslips.map((entry) => (
+                  <div className="table-row cols-5" key={entry.id}>
+                    <span>{entry.name || entry.employee_name || 'Unknown'}</span>
+                    <span>{entry.month}</span>
+                    <span>{entry.net_pay}</span>
+                    <span>{entry.generated_on || '-'}</span>
+                    <span className="actions">
+                      <button type="button" onClick={() => downloadPayslip(entry)}>
+                        Download
+                      </button>
+                      <button type="button" onClick={() => editPayslip(entry)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => deletePayslip(entry.id)}
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </section>
         )}
@@ -1077,12 +1986,20 @@ export default function App() {
                     required
                   />
                 </label>
-                <label>
-                  Reason
-                  <input
-                    type="text"
-                    value={leaveForm.reason}
-                    onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                <label className="full-span">
+                  Subject
+                  <textarea
+                    className="subject"
+                    value={leaveForm.subject}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, subject: e.target.value })}
+                    required
+                  />
+                </label>
+                <label className="full-span">
+                  Description
+                  <textarea
+                    value={leaveForm.description}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, description: e.target.value })}
                     required
                   />
                 </label>
@@ -1091,19 +2008,21 @@ export default function App() {
             </form>
 
             <div className="table">
-              <div className="table-header cols-5">
+              <div className="table-header cols-6">
                 <span>Dates</span>
-                <span>Reason</span>
+                <span>Subject</span>
+                <span>Description</span>
                 <span>Status</span>
                 <span>Created</span>
                 <span>Actions</span>
               </div>
               {employeeLeave.map((entry) => (
-                <div className="table-row cols-5" key={entry.id}>
+                <div className="table-row cols-6" key={entry.id}>
                   <span>
                     {entry.start_date} → {entry.end_date}
                   </span>
-                  <span>{entry.reason}</span>
+                  <span>{entry.subject || '-'}</span>
+                  <span>{entry.description || entry.reason || '-'}</span>
                   <span>{entry.status}</span>
                   <span>{entry.created_at || ''}</span>
                   <span className="actions">
@@ -1168,7 +2087,7 @@ export default function App() {
       return
     }
 
-    await authedFetch('/auth/change-password', {
+    await authedFetchAuth('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({
         currentPassword: passwordForm.current,
