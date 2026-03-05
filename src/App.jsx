@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE_AUTH = import.meta.env.VITE_API_BASE_AUTH || 'http://localhost:3000/api'
-const API_BASE_HR = import.meta.env.VITE_API_BASE_HR || 'http://localhost:3001/api'
+const defaultHost =
+  typeof window !== 'undefined' && window.location ? window.location.hostname : 'localhost'
+const API_BASE_AUTH = import.meta.env.VITE_API_BASE_AUTH || `http://${defaultHost}:4000`
+const API_BASE_HR = import.meta.env.VITE_API_BASE_HR || `http://${defaultHost}:4000`
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard' },
