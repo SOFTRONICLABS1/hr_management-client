@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import logoImage from './assets/softroniclabs-logo.png'
 import './App.css'
 
 const defaultHost =
@@ -59,6 +60,7 @@ export default function App() {
   })
   const [passwordError, setPasswordError] = useState('')
   const [showPasswordFields, setShowPasswordFields] = useState(false)
+  const [showLoginPassword, setShowLoginPassword] = useState(false)
 
   const [employees, setEmployees] = useState([])
   const [attendance, setAttendance] = useState([])
@@ -959,7 +961,9 @@ export default function App() {
       <div className="page">
         <div className="card">
           <div className="brand">
-            <div className="logo">HR</div>
+            <div className="logo">
+              <img src={logoImage} alt="Softroniclabs" />
+            </div>
             <div>
               <p className="eyebrow">Welcome Back</p>
               <h1>Sign in</h1>
@@ -979,13 +983,50 @@ export default function App() {
 
             <label>
               Password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
+              <div className="input-with-icon">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="input-with-icon__field"
+                  required
+                />
+                <button
+                  type="button"
+                  className="ghost icon-button input-with-icon__button"
+                  onClick={() => setShowLoginPassword((prev) => !prev)}
+                  aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showLoginPassword ? (
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M2.1 3.5 3.5 2.1l18.4 18.4-1.4 1.4-2.6-2.6A11.9 11.9 0 0 1 12 21C6.5 21 2.1 17.7 0 12c.8-2.1 2-4 3.7-5.6L2.1 3.5Zm6.4 6.4a3 3 0 0 0 4.2 4.2l-4.2-4.2Zm2.3-4.2a6.1 6.1 0 0 1 6.5 6.5l-2.1-2.1a3 3 0 0 0-4.4-4.4L8.7 3.6A11.7 11.7 0 0 1 12 3c5.5 0 9.9 3.3 12 9a12.9 12.9 0 0 1-3.6 5.2l-1.4-1.4A11 11 0 0 0 22 12c-1.8-4.8-5.4-7-10-7-.9 0-1.8.1-2.7.4l1.5 1.3Z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M12 5c5.5 0 9.9 3.3 12 9-2.1 5.7-6.5 9-12 9S2.1 17.7 0 12c2.1-5.7 6.5-9 12-9Zm0 2c-4.6 0-8.2 2.2-10 5 1.8 2.8 5.4 5 10 5s8.2-2.2 10-5c-1.8-2.8-5.4-5-10-5Zm0 2.5A3.5 3.5 0 1 1 8.5 13 3.5 3.5 0 0 1 12 9.5Z"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </label>
 
             {error && <p className="alert error">{error}</p>}
@@ -1004,7 +1045,9 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="logo">HR</div>
+          <div className="logo">
+            <img src={logoImage} alt="Softroniclabs" />
+          </div>
           <div>
             <p className="eyebrow">{user.role === 'admin' ? 'Admin' : 'Employee'} Console</p>
             <p className="user">Signed in as {user.username}</p>

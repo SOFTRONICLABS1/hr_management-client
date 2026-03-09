@@ -52,12 +52,17 @@ body {
   width: 52px;
   height: 52px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #0f172a, #1e293b);
-  color: #fff;
+  background: transparent;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+}
+
+.logo img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  border-radius: 16px;
+  display: block;
 }
 
 .eyebrow {
@@ -364,9 +369,8 @@ select:focus {
 }
 
 .sidebar .logo {
-  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-  color: #0f172a;
-  box-shadow: 0 10px 20px rgba(14, 165, 233, 0.3);
+  background: transparent;
+  box-shadow: none;
 }
 
 .user {
@@ -529,6 +533,11 @@ select:focus {
   grid-template-columns: 1fr auto auto;
   gap: 8px;
   align-items: center;
+}
+
+.input-with-icon {
+  position: relative;
+  display: block;
 }
 
 .employee-form .grid {
@@ -788,6 +797,44 @@ input[readonly] {
 
 .ghost:hover:not(:disabled) {
   background: #f1f5f9;
+  box-shadow: none;
+}
+
+.icon-button {
+  height: 44px;
+  width: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  margin-top: 0;
+  transform: none;
+  box-shadow: none;
+}
+
+.icon-button svg {
+  display: block;
+}
+
+.input-with-icon__field {
+  width: 100%;
+  padding-right: 56px;
+}
+
+.input-with-icon__button {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #0f172a;
+}
+
+.input-with-icon__button:hover:not(:disabled) {
+  background: #f1f5f9;
+  transform: translateY(-50%);
   box-shadow: none;
 }
 
