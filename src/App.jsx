@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import logoImage from './assets/softroniclabs-logo.png'
 import './App.css'
 
@@ -45,6 +46,150 @@ function useAuthedFetch(onUnauthorized, baseUrl) {
 
 const sanitizeIntInput = (value) => String(value || '').replace(/[^0-9]/g, '')
 const hasNonDigits = (value) => /[^0-9]/.test(String(value || ''))
+const STATUS_OPTIONS = ['Active', 'Onboarding', 'Inactive']
+
+const EMPLOYEE_UPLOAD_FIELDS = [
+  { key: 'sl_no', label: 'Sl No' },
+  { key: 'name', label: 'Name' },
+  { key: 'designation', label: 'Designation' },
+  { key: 'date_of_joining', label: 'Date of Joining' },
+  { key: 'date_of_releaving', label: 'Date of Releaving' },
+  { key: 'address', label: 'Address' },
+  { key: 'date_of_birth', label: 'Date of Birth' },
+  { key: 'blood_group', label: 'Blood Group' },
+  { key: 'father_name', label: 'Father Name' },
+  { key: 'mother_name', label: 'Mother Name' },
+  { key: 'mobile_no', label: 'Mobile No' },
+  { key: 'emergency_mobile_no', label: 'Emergency Mobile No' },
+  { key: 'pan_number', label: 'Pan Number' },
+  { key: 'aadhar_number', label: 'Aadhar Number' },
+  { key: 'email_id', label: 'E-mail ID' },
+  { key: 'official_mail', label: 'Official Mail' },
+  { key: 'bank_account_details', label: 'Bank Account Detailes' },
+]
+
+const EMPLOYEE_HEADER_MAP = {
+  slno: 'sl_no',
+  name: 'name',
+  designation: 'designation',
+  dateofjoining: 'date_of_joining',
+  dateofreleaving: 'date_of_releaving',
+  address: 'address',
+  dateofbirth: 'date_of_birth',
+  bloodgroup: 'blood_group',
+  fathername: 'father_name',
+  mothername: 'mother_name',
+  mobileno: 'mobile_no',
+  emergencymobileno: 'emergency_mobile_no',
+  pannumber: 'pan_number',
+  aadharnumber: 'aadhar_number',
+  emailid: 'email_id',
+  email: 'email_id',
+  officialmail: 'official_mail',
+  bankaccountdetailes: 'bank_account_details',
+  bankaccountdetails: 'bank_account_details',
+}
+
+const normalizeHeader = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+const parseCsvText = (text) => {
+  const rows = []
+  let row = []
+  let value = ''
+  let inQuotes = false
+  const input = String(text || '').replace(/^\uFEFF/, '')
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i]
+    const nextChar = input[i + 1]
+
+    if (char === '"' && inQuotes && nextChar === '"') {
+      value += '"'
+      i += 1
+      continue
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes
+      continue
+    }
+
+    if (char === ',' && !inQuotes) {
+      row.push(value)
+      value = ''
+      continue
+    }
+
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') {
+        i += 1
+      }
+      row.push(value)
+      value = ''
+      if (row.length > 1 || row.some((cell) => String(cell || '').trim())) {
+        rows.push(row)
+      }
+      row = []
+      continue
+    }
+
+    value += char
+  }
+
+  if (value.length > 0 || row.length) {
+    row.push(value)
+    if (row.length > 1 || row.some((cell) => String(cell || '').trim())) {
+      rows.push(row)
+    }
+  }
+
+  return rows
+}
+
+const generateSecurePassword = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$'
+  let value = ''
+  for (let i = 0; i < 10; i += 1) {
+    value += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return value
+}
+
+const excelSerialToDate = (serial) => {
+  if (typeof serial !== 'number' || Number.isNaN(serial)) return ''
+  const parsed = XLSX.SSF.parse_date_code(serial)
+  if (!parsed || !parsed.y) return ''
+  const year = String(parsed.y).padStart(4, '0')
+  const month = String(parsed.m || 1).padStart(2, '0')
+  const day = String(parsed.d || 1).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const normalizeDateValue = (value) => {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') return excelSerialToDate(value) || String(value)
+  const raw = String(value).trim()
+  if (!raw) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw)
+    if (!Number.isNaN(numeric) && numeric > 20000 && numeric < 90000) {
+      return excelSerialToDate(numeric) || raw
+    }
+  }
+  return raw
+}
+
+const normalizeEmployeeDates = (employee) => ({
+  ...employee,
+  date_of_joining: normalizeDateValue(employee?.date_of_joining),
+  date_of_releaving: normalizeDateValue(employee?.date_of_releaving),
+  date_of_birth: normalizeDateValue(employee?.date_of_birth),
+  confirmation_date: normalizeDateValue(employee?.confirmation_date),
+})
 
 export default function App() {
   const [username, setUsername] = useState('')
@@ -85,6 +230,24 @@ export default function App() {
     role: '',
     department: '',
     status: 'Active',
+    sl_no: '',
+    designation: '',
+    date_of_joining: '',
+    date_of_releaving: '',
+    address: '',
+    date_of_birth: '',
+    blood_group: '',
+    father_name: '',
+    mother_name: '',
+    mobile_no: '',
+    emergency_mobile_no: '',
+    pan_number: '',
+    aadhar_number: '',
+    email_id: '',
+    official_mail: '',
+    bank_account_details: '',
+    employment_status: '',
+    confirmation_date: '',
     username: '',
     tempPassword: '',
     resetPassword: '',
@@ -98,6 +261,16 @@ export default function App() {
   }
 
   const [employeeForm, setEmployeeForm] = useState(defaultEmployeeForm)
+  const [employeeBulkStep, setEmployeeBulkStep] = useState('upload')
+  const [employeeBulkFileName, setEmployeeBulkFileName] = useState('')
+  const [employeeBulkRows, setEmployeeBulkRows] = useState([])
+  const [employeeBulkErrors, setEmployeeBulkErrors] = useState([])
+  const [employeeBulkMessage, setEmployeeBulkMessage] = useState('')
+  const [employeeBulkMessageTone, setEmployeeBulkMessageTone] = useState('info')
+  const [employeeBulkSuccess, setEmployeeBulkSuccess] = useState('')
+  const [employeeBulkBusy, setEmployeeBulkBusy] = useState(false)
+  const [showBulkPasswords, setShowBulkPasswords] = useState(false)
+  const [employeeBulkFailures, setEmployeeBulkFailures] = useState([])
 
   const [attendanceForm, setAttendanceForm] = useState({
     employee_id: '',
@@ -158,6 +331,8 @@ export default function App() {
   const [usePrevMonth, setUsePrevMonth] = useState(false)
   const [prevMonthNotice, setPrevMonthNotice] = useState('')
   const [payslipRequestId, setPayslipRequestId] = useState(null)
+  const [employeeDetails, setEmployeeDetails] = useState(null)
+  const [pendingDeleteEmployee, setPendingDeleteEmployee] = useState(null)
 
   const handleNumericChange = (field, value) => {
     const clean = sanitizeIntInput(value)
@@ -332,7 +507,7 @@ export default function App() {
             payslipRequestsData,
             settingsData,
           ]) => {
-          setEmployees(employeesData)
+          setEmployees(employeesData.map(normalizeEmployeeDates))
           setAttendance(attendanceData)
           setLeaveRequests(leaveData)
           setPayslips(payslipsData)
@@ -357,7 +532,7 @@ export default function App() {
 
       Promise.all(tasks)
         .then(([profile, attendanceData, leaveData, payslipRequestData, payslipData]) => {
-          setEmployeeProfile(profile)
+          setEmployeeProfile(normalizeEmployeeDates(profile))
           setEmployeeAttendance(attendanceData)
           setEmployeeLeave(leaveData)
           setEmployeePayslipRequests(payslipRequestData)
@@ -410,6 +585,12 @@ export default function App() {
 
       const data = await res.json()
       localStorage.setItem('token', data.token)
+      setEmployeeProfile(null)
+      setEmployeeAttendance([])
+      setEmployeeLeave([])
+      setEmployeePayslipRequests([])
+      setEmployeePayslips([])
+      setEmployeePayslipRequestMonth('')
       setUser(data.user)
       setActive(data.user.role === 'employee' ? 'employee-dashboard' : 'dashboard')
     } catch (err) {
@@ -424,6 +605,12 @@ export default function App() {
     setUser(null)
     setUsername('')
     setPassword('')
+    setEmployeeProfile(null)
+    setEmployeeAttendance([])
+    setEmployeeLeave([])
+    setEmployeePayslipRequests([])
+    setEmployeePayslips([])
+    setEmployeePayslipRequestMonth('')
   }
 
   function resetEmployeeForm({ keepFilters } = { keepFilters: true }) {
@@ -434,6 +621,309 @@ export default function App() {
     }))
     setEditingEmployee(null)
     setShowTempPassword(false)
+  }
+
+  function resetEmployeeBulkFlow({ keepSuccess } = {}) {
+    setEmployeeBulkStep('upload')
+    setEmployeeBulkFileName('')
+    setEmployeeBulkRows([])
+    setEmployeeBulkErrors([])
+    setEmployeeBulkMessage('')
+    setEmployeeBulkMessageTone('info')
+    if (!keepSuccess) setEmployeeBulkSuccess('')
+    setEmployeeBulkFailures([])
+    setShowBulkPasswords(false)
+  }
+
+  const resolveHeaderKey = (value) => {
+    const normalized = normalizeHeader(value)
+    return EMPLOYEE_HEADER_MAP[normalized] || normalized
+  }
+
+  const buildUsernameSeed = (name, email, slNo) => {
+    if (name && slNo) {
+      return `${name}${slNo}`.toLowerCase().replace(/[^a-z0-9]+/g, '')
+    }
+    if (email && email.includes('@')) {
+      return email.split('@')[0]
+    }
+    if (name) {
+      return name.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
+    }
+    return 'employee'
+  }
+
+  const buildUniqueUsername = (seed, used) => {
+    let base = seed || 'employee'
+    if (!base) base = 'employee'
+    let candidate = base
+    let counter = 1
+    while (used.has(candidate.toLowerCase())) {
+      counter += 1
+      candidate = `${base}${counter}`
+    }
+    used.add(candidate.toLowerCase())
+    return candidate
+  }
+
+  const mapEmployeeRows = (headerRow, dataRows) => {
+    const headerKeys = headerRow.map((cell) => resolveHeaderKey(cell))
+    const usedUsernames = new Set()
+    return dataRows
+      .filter((row) => row && row.some((cell) => String(cell || '').trim()))
+      .map((row, index) => {
+        const raw = {}
+        headerKeys.forEach((key, idx) => {
+          raw[key] = String(row[idx] ?? '').trim()
+        })
+        raw.date_of_joining = normalizeDateValue(raw.date_of_joining)
+        raw.date_of_releaving = normalizeDateValue(raw.date_of_releaving)
+        raw.date_of_birth = normalizeDateValue(raw.date_of_birth)
+        const name = raw.name || ''
+        const designation = raw.designation || ''
+        const emailId = raw.email_id || raw.emailid || ''
+        const officialMail = raw.official_mail || raw.officialmail || ''
+        const email = officialMail || emailId
+        const usernameSeed = buildUsernameSeed(name, email, raw.sl_no)
+        const username = buildUniqueUsername(usernameSeed, usedUsernames)
+        return {
+          id: `row-${index + 1}-${Date.now()}`,
+          ...raw,
+          name,
+          designation,
+          email_id: emailId,
+          official_mail: officialMail,
+          email,
+          username,
+          password: '',
+          status: 'Active',
+          role: designation,
+          department: 'General',
+        }
+      })
+  }
+
+  const validateBulkRows = (rows) => {
+    const usernameSet = new Set()
+    const slNoSet = new Set()
+    const rowErrors = rows.map((row) => {
+      const errors = []
+      if (!row.sl_no) errors.push('Sl No is required.')
+      if (!row.name) errors.push('Name is required.')
+      if (!row.email) errors.push('Email is required.')
+      if (row.email && !row.email.includes('@')) errors.push('Email looks invalid.')
+      if (!row.username) errors.push('Username is required.')
+      if (!row.password) errors.push('Password is required.')
+      if (row.password && row.password.length < 6) errors.push('Password must be at least 6 characters.')
+      if (!row.status) errors.push('Status is required.')
+      const slNoKey = String(row.sl_no || '').toLowerCase()
+      if (slNoKey) {
+        if (slNoSet.has(slNoKey)) {
+          errors.push('Duplicate Sl No in upload.')
+        }
+        slNoSet.add(slNoKey)
+      }
+      const usernameKey = String(row.username || '').toLowerCase()
+      if (usernameKey) {
+        if (usernameSet.has(usernameKey)) {
+          errors.push('Duplicate username in upload.')
+        }
+        usernameSet.add(usernameKey)
+      }
+      return errors
+    })
+    return { rowErrors, hasErrors: rowErrors.some((errors) => errors.length) }
+  }
+
+  async function handleBulkFileUpload(file) {
+    if (!file) return
+    const fileName = file.name || ''
+    const extension = fileName.toLowerCase().split('.').pop()
+    setEmployeeBulkMessage('')
+    setEmployeeBulkMessageTone('info')
+    setEmployeeBulkErrors([])
+    setEmployeeBulkSuccess('')
+
+    if (!['csv', 'xlsx'].includes(extension)) {
+      setEmployeeBulkMessageTone('error')
+      setEmployeeBulkMessage('Unsupported file type. Upload a .csv or .xlsx file.')
+      return
+    }
+
+    try {
+      let rows = []
+      if (extension === 'csv') {
+        const text = await file.text()
+        rows = parseCsvText(text)
+      } else {
+        const buffer = await file.arrayBuffer()
+        const workbook = XLSX.read(buffer, { type: 'array' })
+        const sheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[sheetName]
+        rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+      }
+
+      if (!rows.length) {
+        setEmployeeBulkMessageTone('error')
+        setEmployeeBulkMessage('The uploaded file is empty.')
+        return
+      }
+
+      const [headerRow, ...dataRows] = rows
+      if (!headerRow || !headerRow.length) {
+        setEmployeeBulkMessageTone('error')
+        setEmployeeBulkMessage('The uploaded file is missing a header row.')
+        return
+      }
+
+      const mappedRows = mapEmployeeRows(headerRow, dataRows)
+      if (!mappedRows.length) {
+        setEmployeeBulkMessageTone('error')
+        setEmployeeBulkMessage('No employee rows were found in the uploaded file.')
+        return
+      }
+
+      const headerKeys = headerRow.map((cell) => resolveHeaderKey(cell))
+      const requiredMissing = []
+      if (!headerKeys.includes('name')) requiredMissing.push('Name')
+      if (!headerKeys.includes('designation')) requiredMissing.push('Designation')
+      if (!headerKeys.includes('email_id') && !headerKeys.includes('official_mail')) {
+        requiredMissing.push('E-mail ID or Official Mail')
+      }
+
+      if (requiredMissing.length) {
+        setEmployeeBulkMessageTone('info')
+        setEmployeeBulkMessage(
+          `Missing required columns: ${requiredMissing.join(', ')}. You can still continue, but fill missing data in review.`,
+        )
+      }
+
+      setEmployeeBulkFileName(fileName)
+      setEmployeeBulkRows(mappedRows)
+      setEmployeeBulkErrors(validateBulkRows(mappedRows).rowErrors)
+      setEmployeeBulkStep('credentials')
+    } catch (err) {
+      setEmployeeBulkMessageTone('error')
+      setEmployeeBulkMessage('Unable to read the uploaded file. Please verify the format and try again.')
+    }
+  }
+
+  const updateBulkRow = (id, updates) => {
+    setEmployeeBulkRows((prev) => {
+      const nextRows = prev.map((row) => (row.id === id ? { ...row, ...updates } : row))
+      setEmployeeBulkErrors(validateBulkRows(nextRows).rowErrors)
+      return nextRows
+    })
+  }
+
+  const handleBulkGeneratePasswords = () => {
+    setEmployeeBulkRows((prev) => {
+      const nextRows = prev.map((row) => ({
+        ...row,
+        password: row.password || generateSecurePassword(),
+      }))
+      setEmployeeBulkErrors(validateBulkRows(nextRows).rowErrors)
+      return nextRows
+    })
+  }
+
+  const handleBulkGenerateUsernames = () => {
+    setEmployeeBulkRows((prev) => {
+      const used = new Set()
+      const nextRows = prev.map((row) => {
+        const seed = buildUsernameSeed(row.name, row.email, row.sl_no)
+        const username = buildUniqueUsername(seed, used)
+        return { ...row, username }
+      })
+      setEmployeeBulkErrors(validateBulkRows(nextRows).rowErrors)
+      return nextRows
+    })
+  }
+
+  const proceedToReview = () => {
+    const { rowErrors, hasErrors } = validateBulkRows(employeeBulkRows)
+    setEmployeeBulkErrors(rowErrors)
+    if (hasErrors) {
+      setEmployeeBulkMessageTone('error')
+      setEmployeeBulkMessage('Fix the highlighted rows before continuing.')
+      return
+    }
+    setEmployeeBulkMessageTone('info')
+    setEmployeeBulkMessage('')
+    setEmployeeBulkStep('review')
+  }
+
+  const submitBulkEmployees = async () => {
+    const { rowErrors, hasErrors } = validateBulkRows(employeeBulkRows)
+    setEmployeeBulkErrors(rowErrors)
+    if (hasErrors) {
+      setEmployeeBulkMessageTone('error')
+      setEmployeeBulkMessage('Fix the highlighted rows before adding employees.')
+      return
+    }
+
+    setEmployeeBulkBusy(true)
+    setEmployeeBulkMessage('')
+    setEmployeeBulkMessageTone('info')
+    setEmployeeBulkSuccess('')
+
+    const createdEmployees = []
+    const failed = []
+
+    for (const row of employeeBulkRows) {
+      try {
+        const created = await authedFetchAuth('/employees', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: row.name,
+            email: row.email,
+            role: row.role || row.designation || 'Staff',
+            department: row.department || 'General',
+            status: row.status || 'Active',
+            username: row.username,
+            password: row.password,
+            sl_no: row.sl_no,
+            designation: row.designation,
+            date_of_joining: row.date_of_joining,
+            date_of_releaving: row.date_of_releaving,
+            address: row.address,
+            date_of_birth: row.date_of_birth,
+            blood_group: row.blood_group,
+            father_name: row.father_name,
+            mother_name: row.mother_name,
+            mobile_no: row.mobile_no,
+            emergency_mobile_no: row.emergency_mobile_no,
+            pan_number: row.pan_number,
+            aadhar_number: row.aadhar_number,
+            email_id: row.email_id,
+            official_mail: row.official_mail,
+            bank_account_details: row.bank_account_details,
+          }),
+        })
+        createdEmployees.push(normalizeEmployeeDates(created))
+      } catch (err) {
+        failed.push({ name: row.name || row.username || 'Employee', error: err.message })
+      }
+    }
+
+    if (createdEmployees.length) {
+      setEmployees((prev) => [...createdEmployees, ...prev])
+    }
+
+    if (failed.length) {
+      setEmployeeBulkFailures(failed)
+      setEmployeeBulkMessageTone('error')
+      setEmployeeBulkMessage(
+        `Added ${createdEmployees.length} employee(s). ${failed.length} failed: ${failed
+          .map((item) => item.name)
+          .join(', ')}.`,
+      )
+    } else {
+      resetEmployeeBulkFlow({ keepSuccess: true })
+      setEmployeeBulkSuccess(`Employees added successfully. Total added: ${createdEmployees.length}.`)
+    }
+
+    setEmployeeBulkBusy(false)
   }
 
   async function upsertEmployee(e) {
@@ -461,15 +951,16 @@ export default function App() {
           role: employeeForm.role,
           department: employeeForm.department,
           status: employeeForm.status,
+          sl_no: employeeForm.sl_no,
           username: employeeForm.username,
           password: employeeForm.tempPassword,
           permissions: employeeForm.permissions,
         }),
       })
 
-      setEmployees((prev) => [created, ...prev])
+      setEmployees((prev) => [normalizeEmployeeDates(created), ...prev])
     } else {
-      const updated = await authedFetchAuth(`/employees/${editingEmployee.id}`, {
+      const updated = await authedFetchAuth(`/employees/${editingEmployee.sl_no}`, {
         method: 'PUT',
         body: JSON.stringify({
           name: employeeForm.name,
@@ -477,12 +968,34 @@ export default function App() {
           role: employeeForm.role,
           department: employeeForm.department,
           status: employeeForm.status,
+          sl_no: employeeForm.sl_no,
+          designation: employeeForm.designation,
+          date_of_joining: employeeForm.date_of_joining,
+          date_of_releaving: employeeForm.date_of_releaving,
+          address: employeeForm.address,
+          date_of_birth: employeeForm.date_of_birth,
+          blood_group: employeeForm.blood_group,
+          father_name: employeeForm.father_name,
+          mother_name: employeeForm.mother_name,
+          mobile_no: employeeForm.mobile_no,
+          emergency_mobile_no: employeeForm.emergency_mobile_no,
+          pan_number: employeeForm.pan_number,
+          aadhar_number: employeeForm.aadhar_number,
+          email_id: employeeForm.email_id,
+          official_mail: employeeForm.official_mail,
+          bank_account_details: employeeForm.bank_account_details,
+          employment_status: employeeForm.employment_status,
+          confirmation_date: employeeForm.confirmation_date,
           permissions: employeeForm.permissions,
           reset_password: employeeForm.resetPassword || '',
         }),
       })
 
-      setEmployees((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      setEmployees((prev) =>
+        prev.map((item) =>
+          item.sl_no === updated.sl_no ? normalizeEmployeeDates(updated) : item,
+        ),
+      )
       setEditingEmployee(null)
     }
 
@@ -490,17 +1003,36 @@ export default function App() {
   }
 
   function editEmployee(employee) {
-    setEditingEmployee(employee)
+    const normalized = normalizeEmployeeDates(employee)
+    setEditingEmployee(normalized)
     setEmployeeForm((prev) => ({
-      name: employee.name,
-      email: employee.email,
-      role: employee.role,
-      department: employee.department,
-      status: employee.status,
+      name: normalized.name,
+      email: normalized.email,
+      role: normalized.role,
+      department: normalized.department,
+      status: normalized.status,
+      sl_no: normalized.sl_no || '',
+      designation: normalized.designation || '',
+      date_of_joining: normalized.date_of_joining || '',
+      date_of_releaving: normalized.date_of_releaving || '',
+      address: normalized.address || '',
+      date_of_birth: normalized.date_of_birth || '',
+      blood_group: normalized.blood_group || '',
+      father_name: normalized.father_name || '',
+      mother_name: normalized.mother_name || '',
+      mobile_no: normalized.mobile_no || '',
+      emergency_mobile_no: normalized.emergency_mobile_no || '',
+      pan_number: normalized.pan_number || '',
+      aadhar_number: normalized.aadhar_number || '',
+      email_id: normalized.email_id || '',
+      official_mail: normalized.official_mail || '',
+      bank_account_details: normalized.bank_account_details || '',
+      employment_status: normalized.employment_status || '',
+      confirmation_date: normalized.confirmation_date || '',
       username: '',
       tempPassword: '',
       resetPassword: '',
-      permissions: employee.permissions || {
+      permissions: normalized.permissions || {
         attendance_view: true,
         leave_apply: true,
         profile_view: true,
@@ -531,7 +1063,44 @@ export default function App() {
 
   async function deleteEmployee(id) {
     await authedFetchAuth(`/employees/${id}`, { method: 'DELETE' })
-    setEmployees((prev) => prev.filter((item) => item.id !== id))
+    setEmployees((prev) => prev.filter((item) => item.sl_no !== id))
+  }
+
+  async function updateEmployeeStatus(employee, nextStatus) {
+    const updated = await authedFetchAuth(`/employees/${employee.sl_no}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: employee.name,
+        email: employee.email,
+        role: employee.role,
+        department: employee.department,
+        status: nextStatus,
+        sl_no: employee.sl_no,
+        designation: employee.designation,
+        date_of_joining: employee.date_of_joining,
+        date_of_releaving: employee.date_of_releaving,
+        address: employee.address,
+        date_of_birth: employee.date_of_birth,
+        blood_group: employee.blood_group,
+        father_name: employee.father_name,
+        mother_name: employee.mother_name,
+        mobile_no: employee.mobile_no,
+        emergency_mobile_no: employee.emergency_mobile_no,
+        pan_number: employee.pan_number,
+        aadhar_number: employee.aadhar_number,
+        email_id: employee.email_id,
+        official_mail: employee.official_mail,
+        bank_account_details: employee.bank_account_details,
+        employment_status: employee.employment_status,
+        confirmation_date: employee.confirmation_date,
+        username: employee.username,
+      }),
+    })
+    setEmployees((prev) =>
+      prev.map((item) =>
+        item.sl_no === updated.sl_no ? normalizeEmployeeDates(updated) : item,
+      ),
+    )
   }
 
   function resetPayslipForm() {
@@ -544,7 +1113,7 @@ export default function App() {
   }
 
   function handlePayslipEmployeeChange(employeeId) {
-    const selected = employees.find((item) => String(item.id) === String(employeeId))
+    const selected = employees.find((item) => String(item.sl_no) === String(employeeId))
     setPayslipForm((prev) => ({
       ...prev,
       employee_id: employeeId,
@@ -743,7 +1312,7 @@ export default function App() {
 
   async function upsertAttendance(e) {
     e.preventDefault()
-    const employee = employees.find((item) => item.id === attendanceForm.employee_id)
+    const employee = employees.find((item) => item.sl_no === attendanceForm.employee_id)
 
     if (editingAttendance) {
       const updated = await authedFetchHR(`/attendance?id=${editingAttendance.id}`, {
@@ -791,7 +1360,7 @@ export default function App() {
 
   async function upsertLeave(e) {
     e.preventDefault()
-    const employee = employees.find((item) => item.id === leaveForm.employee_id)
+    const employee = employees.find((item) => item.sl_no === leaveForm.employee_id)
 
     if (editingLeave) {
       const updated = await authedFetchHR(`/leave/${editingLeave.id}`, {
@@ -1162,7 +1731,14 @@ export default function App() {
                 {editingEmployee && (
                   <span className="pill subtle">Editing {employeeForm.name || 'employee'}</span>
                 )}
-                <button type="button" className="ghost" onClick={() => resetEmployeeForm({ keepFilters: true })}>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    resetEmployeeForm({ keepFilters: true })
+                    resetEmployeeBulkFlow()
+                  }}
+                >
                   New Employee
                 </button>
               </div>
@@ -1189,17 +1765,13 @@ export default function App() {
 
             <div className="employee-page">
               <div className="employee-form-wrap">
-                <form className="panel employee-form" onSubmit={upsertEmployee}>
-                  <div className="panel-header">
-                    <div>
-                      <h2>{editingEmployee ? 'Edit Employee' : 'Add Employee'}</h2>
-                      <p className="muted">
-                        {editingEmployee
-                          ? 'Update profile details and permissions.'
-                          : 'Create a new profile with login access and permissions.'}
-                      </p>
-                    </div>
-                    {editingEmployee && (
+                {editingEmployee ? (
+                  <form className="panel employee-form" onSubmit={upsertEmployee}>
+                    <div className="panel-header">
+                      <div>
+                        <h2>Edit Employee</h2>
+                        <p className="muted">Update profile details and permissions.</p>
+                      </div>
                       <button
                         type="button"
                         className="ghost"
@@ -1207,81 +1779,262 @@ export default function App() {
                       >
                         Clear
                       </button>
-                    )}
-                  </div>
+                    </div>
 
-                <div className="grid">
-                  <label>
-                    Name
-                    <input
-                      type="text"
-                        value={employeeForm.name}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label>
-                      Email
-                      <input
-                        type="email"
-                        value={employeeForm.email}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label>
-                      Role
-                      <input
-                        type="text"
-                        value={employeeForm.role}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label>
-                      Department
-                      <input
-                        type="text"
-                        value={employeeForm.department}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, department: e.target.value })}
-                        required
-                      />
-                    </label>
-                    <label>
-                      Status
-                      <select
-                        value={employeeForm.status}
-                        onChange={(e) => setEmployeeForm({ ...employeeForm, status: e.target.value })}
-                      >
-                        <option>Active</option>
-                        <option>Onboarding</option>
-                        <option>Inactive</option>
-                      </select>
-                    </label>
-                  {!editingEmployee && (
-                    <>
+                    <div className="grid">
+                      <div className="full-span form-section">Core Details</div>
                       <label>
-                        Username
+                        Name
                         <input
                           type="text"
-                          value={employeeForm.username}
+                          value={employeeForm.name}
+                          onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Email
+                        <input
+                          type="email"
+                          value={employeeForm.email}
+                          onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Role
+                        <input
+                          type="text"
+                          value={employeeForm.role}
+                          onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Department
+                        <input
+                          type="text"
+                          value={employeeForm.department}
                           onChange={(e) =>
-                            setEmployeeForm({ ...employeeForm, username: e.target.value })
+                            setEmployeeForm({ ...employeeForm, department: e.target.value })
                           }
                           required
                         />
-                        <span className="field-hint">Used to sign in. Keep it short and unique.</span>
                       </label>
                       <label>
-                        Temp Password
+                        Status
+                        <select
+                          value={employeeForm.status}
+                          onChange={(e) => setEmployeeForm({ ...employeeForm, status: e.target.value })}
+                        >
+                          {STATUS_OPTIONS.map((option) => (
+                            <option key={option}>{option}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Employment Status
+                        <select
+                          value={employeeForm.employment_status}
+                          onChange={(e) => {
+                            const value = e.target.value
+                            setEmployeeForm((prev) => ({
+                              ...prev,
+                              employment_status: value,
+                              confirmation_date:
+                                value === 'Full Time' ? prev.confirmation_date : '',
+                            }))
+                          }}
+                        >
+                          <option value="">Select</option>
+                          <option>Probation</option>
+                          <option>Full Time</option>
+                        </select>
+                      </label>
+                      {employeeForm.employment_status === 'Full Time' && (
+                        <label>
+                          Date of Confirmation
+                          <input
+                            type="date"
+                            value={employeeForm.confirmation_date}
+                            onChange={(e) =>
+                              setEmployeeForm({ ...employeeForm, confirmation_date: e.target.value })
+                            }
+                            required
+                          />
+                        </label>
+                      )}
+                      <div className="full-span form-section">Employment Details</div>
+                      <label>
+                        Sl No
+                        <input
+                          type="text"
+                          value={employeeForm.sl_no}
+                          onChange={(e) => setEmployeeForm({ ...employeeForm, sl_no: e.target.value })}
+                          readOnly
+                        />
+                      </label>
+                      <label>
+                        Designation
+                        <input
+                          type="text"
+                          value={employeeForm.designation}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, designation: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Date of Joining
+                        <input
+                          type="date"
+                          value={employeeForm.date_of_joining}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, date_of_joining: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Date of Releaving
+                        <input
+                          type="date"
+                          value={employeeForm.date_of_releaving}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, date_of_releaving: e.target.value })
+                          }
+                        />
+                      </label>
+                      <div className="full-span form-section">Personal Details</div>
+                      <label>
+                        Date of Birth
+                        <input
+                          type="date"
+                          value={employeeForm.date_of_birth}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, date_of_birth: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Blood Group
+                        <input
+                          type="text"
+                          value={employeeForm.blood_group}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, blood_group: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Father Name
+                        <input
+                          type="text"
+                          value={employeeForm.father_name}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, father_name: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Mother Name
+                        <input
+                          type="text"
+                          value={employeeForm.mother_name}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, mother_name: e.target.value })
+                          }
+                        />
+                      </label>
+                      <div className="full-span form-section">Contact Details</div>
+                      <label>
+                        Mobile No
+                        <input
+                          type="text"
+                          value={employeeForm.mobile_no}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, mobile_no: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Emergency Mobile No
+                        <input
+                          type="text"
+                          value={employeeForm.emergency_mobile_no}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, emergency_mobile_no: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="full-span">
+                        Address
+                        <textarea
+                          value={employeeForm.address}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, address: e.target.value })
+                          }
+                        />
+                      </label>
+                      <div className="full-span form-section">Identity & Banking</div>
+                      <label>
+                        Pan Number
+                        <input
+                          type="text"
+                          value={employeeForm.pan_number}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, pan_number: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Aadhar Number
+                        <input
+                          type="text"
+                          value={employeeForm.aadhar_number}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, aadhar_number: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        E-mail ID
+                        <input
+                          type="email"
+                          value={employeeForm.email_id}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, email_id: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Official Mail
+                        <input
+                          type="email"
+                          value={employeeForm.official_mail}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, official_mail: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="full-span">
+                        Bank Account Detailes
+                        <textarea
+                          value={employeeForm.bank_account_details}
+                          onChange={(e) =>
+                            setEmployeeForm({ ...employeeForm, bank_account_details: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Reset Password
                         <div className="input-row">
                           <input
                             type={showTempPassword ? 'text' : 'password'}
-                            value={employeeForm.tempPassword}
+                            value={employeeForm.resetPassword}
                             onChange={(e) =>
-                              setEmployeeForm({ ...employeeForm, tempPassword: e.target.value })
+                              setEmployeeForm({ ...employeeForm, resetPassword: e.target.value })
                             }
-                            required
+                            placeholder="New password"
                           />
                           <button
                             type="button"
@@ -1290,107 +2043,74 @@ export default function App() {
                           >
                             {showTempPassword ? 'Hide' : 'Show'}
                           </button>
-                          <button type="button" className="secondary" onClick={generateTempPassword}>
+                          <button type="button" className="secondary" onClick={generateResetPassword}>
                             Generate
                           </button>
                         </div>
                         <span className="field-hint">
-                          Share this once. The employee should change it after first login.
+                          If provided, the employee login password will be reset.
                         </span>
                       </label>
-                    </>
-                  )}
-                  {editingEmployee && (
-                    <label>
-                      Reset Password
-                      <div className="input-row">
-                        <input
-                          type={showTempPassword ? 'text' : 'password'}
-                          value={employeeForm.resetPassword}
-                          onChange={(e) =>
-                            setEmployeeForm({ ...employeeForm, resetPassword: e.target.value })
-                          }
-                          placeholder="New password"
-                        />
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => setShowTempPassword((prev) => !prev)}
-                        >
-                          {showTempPassword ? 'Hide' : 'Show'}
-                        </button>
-                        <button type="button" className="secondary" onClick={generateResetPassword}>
-                          Generate
-                        </button>
-                      </div>
-                      <span className="field-hint">
-                        If provided, the employee login password will be reset.
-                      </span>
-                    </label>
-                  )}
-                    <label>
-                      Permissions
-                      <div className="toggle-group">
-                        <label className="toggle">
-                          <span>View Attendance</span>
-                          <input
-                            type="checkbox"
-                            checked={employeeForm.permissions.attendance_view}
-                            onChange={(e) =>
-                              setEmployeeForm({
-                                ...employeeForm,
-                                permissions: {
-                                  ...employeeForm.permissions,
-                                  attendance_view: e.target.checked,
-                                },
-                              })
-                            }
-                          />
-                          <span className="toggle-track" aria-hidden="true" />
-                        </label>
-                        <label className="toggle">
-                          <span>Apply Leave</span>
-                          <input
-                            type="checkbox"
-                            checked={employeeForm.permissions.leave_apply}
-                            onChange={(e) =>
-                              setEmployeeForm({
-                                ...employeeForm,
-                                permissions: {
-                                  ...employeeForm.permissions,
-                                  leave_apply: e.target.checked,
-                                },
-                              })
-                            }
-                          />
-                          <span className="toggle-track" aria-hidden="true" />
-                        </label>
-                        <label className="toggle">
-                          <span>View Profile</span>
-                          <input
-                            type="checkbox"
-                            checked={employeeForm.permissions.profile_view}
-                            onChange={(e) =>
-                              setEmployeeForm({
-                                ...employeeForm,
-                                permissions: {
-                                  ...employeeForm.permissions,
-                                  profile_view: e.target.checked,
-                                },
-                              })
-                            }
-                          />
-                          <span className="toggle-track" aria-hidden="true" />
-                        </label>
-                      </div>
-                    </label>
-                  </div>
+                      <label>
+                        Permissions
+                        <div className="toggle-group">
+                          <label className="toggle">
+                            <span>View Attendance</span>
+                            <input
+                              type="checkbox"
+                              checked={employeeForm.permissions.attendance_view}
+                              onChange={(e) =>
+                                setEmployeeForm({
+                                  ...employeeForm,
+                                  permissions: {
+                                    ...employeeForm.permissions,
+                                    attendance_view: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                            <span className="toggle-track" aria-hidden="true" />
+                          </label>
+                          <label className="toggle">
+                            <span>Apply Leave</span>
+                            <input
+                              type="checkbox"
+                              checked={employeeForm.permissions.leave_apply}
+                              onChange={(e) =>
+                                setEmployeeForm({
+                                  ...employeeForm,
+                                  permissions: {
+                                    ...employeeForm.permissions,
+                                    leave_apply: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                            <span className="toggle-track" aria-hidden="true" />
+                          </label>
+                          <label className="toggle">
+                            <span>View Profile</span>
+                            <input
+                              type="checkbox"
+                              checked={employeeForm.permissions.profile_view}
+                              onChange={(e) =>
+                                setEmployeeForm({
+                                  ...employeeForm,
+                                  permissions: {
+                                    ...employeeForm.permissions,
+                                    profile_view: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                            <span className="toggle-track" aria-hidden="true" />
+                          </label>
+                        </div>
+                      </label>
+                    </div>
 
-                  <div className="form-actions">
-                    <button type="submit">
-                      {editingEmployee ? 'Update Employee' : 'Add Employee'}
-                    </button>
-                    {editingEmployee && (
+                    <div className="form-actions">
+                      <button type="submit">Update Employee</button>
                       <button
                         type="button"
                         className="secondary"
@@ -1398,9 +2118,192 @@ export default function App() {
                       >
                         Cancel
                       </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="panel employee-form">
+                    <div className="panel-header">
+                      <div>
+                        <h2>Add Employees</h2>
+                        <p className="muted">
+                          Upload a CSV or Excel file, review the details, and create employee accounts.
+                        </p>
+                      </div>
+                      {employeeBulkFileName && (
+                        <span className="pill subtle">File: {employeeBulkFileName}</span>
+                      )}
+                    </div>
+
+                    <div className="stepper">
+                      <span
+                        className={`step ${employeeBulkStep === 'upload' ? 'active' : 'done'}`}
+                      >
+                        1. Upload Data
+                      </span>
+                      <span
+                        className={`step ${
+                          employeeBulkStep === 'credentials'
+                            ? 'active'
+                            : employeeBulkStep === 'review'
+                              ? 'done'
+                              : ''
+                        }`}
+                      >
+                        2. Create Accounts
+                      </span>
+                      <span className={`step ${employeeBulkStep === 'review' ? 'active' : ''}`}>
+                        3. Review & Add
+                      </span>
+                    </div>
+
+                    {employeeBulkMessage && (
+                      <p className={`alert ${employeeBulkMessageTone}`}>{employeeBulkMessage}</p>
+                    )}
+
+                    {employeeBulkStep === 'upload' && (
+                      <div className="upload-panel">
+                        <div className="upload-box">
+                          <label className="file-upload">
+                            <input
+                              type="file"
+                              accept=".csv,.xlsx"
+                              onChange={(e) => handleBulkFileUpload(e.target.files?.[0])}
+                            />
+                            <span>Upload CSV / Excel</span>
+                          </label>
+                          <p className="muted">Supported file types: .csv, .xlsx</p>
+                        </div>
+                        <div className="upload-example">
+                          <p className="label">Expected Columns</p>
+                          <div className="tag-grid">
+                            {EMPLOYEE_UPLOAD_FIELDS.map((field) => (
+                              <span className="tag" key={field.key}>
+                                {field.label}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {employeeBulkStep === 'credentials' && (
+                      <>
+                        <div className="bulk-actions">
+                          <div>
+                            <p className="muted">
+                              {employeeBulkRows.length} employee(s) loaded. Add usernames, passwords, and status.
+                            </p>
+                          </div>
+                          <div className="button-row">
+                            <button type="button" className="ghost" onClick={handleBulkGenerateUsernames}>
+                              Auto-fill Usernames
+                            </button>
+                            <button type="button" className="ghost" onClick={handleBulkGeneratePasswords}>
+                              Generate Passwords
+                            </button>
+                            <button type="button" className="ghost" onClick={() => setShowBulkPasswords((prev) => !prev)}>
+                              {showBulkPasswords ? 'Hide Passwords' : 'Show Passwords'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="table-scroll">
+                          <div className="table">
+                            <div className="table-header bulk">
+                              <span>Name</span>
+                              <span>Designation</span>
+                              <span>Email</span>
+                              <span>Username</span>
+                              <span>Password</span>
+                              <span>Status</span>
+                              <span>Issues</span>
+                            </div>
+                            {employeeBulkRows.map((row, index) => (
+                              <div className="table-row bulk" key={row.id}>
+                                <span>{row.name || '-'}</span>
+                                <span>{row.designation || '-'}</span>
+                                <span>{row.email || '-'}</span>
+                                <span>
+                                  <input
+                                    type="text"
+                                    value={row.username}
+                                    onChange={(e) => updateBulkRow(row.id, { username: e.target.value })}
+                                  />
+                                </span>
+                                <span>
+                                  <input
+                                    type={showBulkPasswords ? 'text' : 'password'}
+                                    value={row.password}
+                                    onChange={(e) => updateBulkRow(row.id, { password: e.target.value })}
+                                  />
+                                </span>
+                                <span>
+                                  <select
+                                    value={row.status}
+                                    onChange={(e) => updateBulkRow(row.id, { status: e.target.value })}
+                                  >
+                                    {STATUS_OPTIONS.map((option) => (
+                                      <option key={option}>{option}</option>
+                                    ))}
+                                  </select>
+                                </span>
+                                <span className="issues">
+                                  {(employeeBulkErrors[index] || []).slice(0, 2).map((err) => (
+                                    <span key={err}>{err}</span>
+                                  ))}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="form-actions">
+                          <button type="button" className="secondary" onClick={() => setEmployeeBulkStep('upload')}>
+                            Back
+                          </button>
+                          <button type="button" onClick={proceedToReview}>
+                            Continue to Review
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {employeeBulkStep === 'review' && (
+                      <>
+                        <p className="muted">Review all employee details before adding.</p>
+                        <div className="table-scroll">
+                          <div className="table">
+                            <div className="table-header review">
+                              {EMPLOYEE_UPLOAD_FIELDS.map((field) => (
+                                <span key={field.key}>{field.label}</span>
+                              ))}
+                              <span>Username</span>
+                              <span>Status</span>
+                            </div>
+                            {employeeBulkRows.map((row) => (
+                              <div className="table-row review" key={row.id}>
+                                {EMPLOYEE_UPLOAD_FIELDS.map((field) => (
+                                  <span key={field.key}>{row[field.key] || '-'}</span>
+                                ))}
+                                <span>{row.username || '-'}</span>
+                                <span>{row.status || '-'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="form-actions">
+                          <button type="button" className="secondary" onClick={() => setEmployeeBulkStep('credentials')}>
+                            Back
+                          </button>
+                          <button type="button" onClick={submitBulkEmployees} disabled={employeeBulkBusy}>
+                            {employeeBulkBusy ? 'Adding...' : 'Add Employees'}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
-                </form>
+                )}
               </div>
 
               <div className="employee-list">
@@ -1446,25 +2349,35 @@ export default function App() {
                       </div>
                     )}
                     {filteredEmployees.map((employee) => (
-                      <div className="table-row" key={employee.id}>
+                      <div className="table-row" key={employee.sl_no || employee.email}>
                         <span>{employee.name}</span>
                         <span>{employee.email}</span>
                         <span>{employee.role}</span>
                         <span>{employee.department}</span>
                         <span>
-                          <span
-                            className={`status-badge status-${employee.status.toLowerCase()}`}
+                          <select
+                            className="status-select"
+                            value={employee.status}
+                            onChange={(e) => updateEmployeeStatus(employee, e.target.value)}
                           >
-                            {employee.status}
-                          </span>
+                            {STATUS_OPTIONS.map((option) => (
+                              <option key={option}>{option}</option>
+                            ))}
+                          </select>
                         </span>
                         <span className="actions">
+                          <button
+                            type="button"
+                            onClick={() => setEmployeeDetails(normalizeEmployeeDates(employee))}
+                          >
+                            View
+                          </button>
                           <button type="button" onClick={() => editEmployee(employee)}>
                             Edit
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteEmployee(employee.id)}
+                            onClick={() => setPendingDeleteEmployee(employee)}
                             className="danger"
                           >
                             Delete
@@ -1476,6 +2389,164 @@ export default function App() {
                 </div>
               </div>
             </div>
+            {employeeBulkSuccess && (
+              <div className="modal">
+                <div className="modal-content">
+                  <h3>Employees Added</h3>
+                  <p>{employeeBulkSuccess}</p>
+                  <button type="button" onClick={() => setEmployeeBulkSuccess('')}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+            {employeeBulkFailures.length > 0 && (
+              <div className="modal">
+                <div className="modal-content modal-wide">
+                  <div className="modal-header">
+                    <div>
+                      <h3>Some Employees Were Not Added</h3>
+                      <p className="muted">Check the errors below (usernames must be unique).</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setEmployeeBulkFailures([])}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="table">
+                    <div className="table-header cols-3">
+                      <span>Employee</span>
+                      <span>Error</span>
+                      <span>Hint</span>
+                    </div>
+                    {employeeBulkFailures.map((item) => (
+                      <div className="table-row cols-3" key={`${item.name}-${item.error}`}>
+                        <span>{item.name}</span>
+                        <span>{item.error}</span>
+                        <span>
+                          {item.error?.toLowerCase().includes('username')
+                            ? 'Use a unique username'
+                            : 'Review details and try again'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            {pendingDeleteEmployee && (
+              <div className="modal">
+                <div className="modal-content">
+                  <h3>Delete Employee?</h3>
+                  <p>
+                    Do you want to delete{' '}
+                    <strong>{pendingDeleteEmployee.name || 'this employee'}</strong>?
+                  </p>
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setPendingDeleteEmployee(null)}
+                    >
+                      No
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={async () => {
+                        await deleteEmployee(pendingDeleteEmployee.sl_no)
+                        setPendingDeleteEmployee(null)
+                      }}
+                    >
+                      Yes, Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {employeeDetails && (
+              <div className="modal">
+                <div className="modal-content modal-wide">
+                  <div className="modal-header">
+                    <div>
+                      <h3>{employeeDetails.name}</h3>
+                      <p className="muted">Full employee details</p>
+                    </div>
+                    <button type="button" className="ghost" onClick={() => setEmployeeDetails(null)}>
+                      Close
+                    </button>
+                  </div>
+                  <div className="details-scroll">
+                    <div className="details-grid">
+                    {EMPLOYEE_UPLOAD_FIELDS.map((field) => {
+                      const rawValue = employeeDetails[field.key]
+                      const displayValue =
+                        field.key === 'date_of_joining' ||
+                        field.key === 'date_of_releaving' ||
+                        field.key === 'date_of_birth'
+                          ? normalizeDateValue(rawValue)
+                          : rawValue
+                      return (
+                        <div className="detail-item" key={field.key}>
+                          <p className="label">{field.label}</p>
+                          <p className="value">{displayValue || '-'}</p>
+                        </div>
+                      )
+                    })}
+                    <div className="detail-item">
+                      <p className="label">Email</p>
+                      <p className="value">{employeeDetails.email || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Role</p>
+                      <p className="value">{employeeDetails.role || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Department</p>
+                      <p className="value">{employeeDetails.department || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Status</p>
+                      <p className="value">{employeeDetails.status || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Employment Status</p>
+                      <p className="value">{employeeDetails.employment_status || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Date of Confirmation</p>
+                      <p className="value">
+                        {normalizeDateValue(employeeDetails.confirmation_date) || '-'}
+                      </p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Username</p>
+                      <p className="value">{employeeDetails.username || '-'}</p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Probation Duration</p>
+                      <p className="value">
+                        {employeeDetails.probation_years ?? '-'}y{' '}
+                        {employeeDetails.probation_months ?? '-'}m{' '}
+                        {employeeDetails.probation_days ?? '-'}d
+                      </p>
+                    </div>
+                    <div className="detail-item">
+                      <p className="label">Full Time Duration</p>
+                      <p className="value">
+                        {employeeDetails.fulltime_years ?? '-'}y{' '}
+                        {employeeDetails.fulltime_months ?? '-'}m{' '}
+                        {employeeDetails.fulltime_days ?? '-'}d
+                      </p>
+                    </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -1497,7 +2568,7 @@ export default function App() {
                   >
                     <option value="">Select employee</option>
                     {employeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
+                      <option key={employee.sl_no} value={employee.sl_no}>
                         {employee.name}
                       </option>
                     ))}
@@ -1574,7 +2645,7 @@ export default function App() {
                   >
                     <option value="">Select employee</option>
                     {employeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
+                      <option key={employee.sl_no} value={employee.sl_no}>
                         {employee.name}
                       </option>
                     ))}
@@ -1797,7 +2868,7 @@ export default function App() {
                   >
                     <option value="">Select employee</option>
                     {employeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
+                      <option key={employee.sl_no} value={employee.sl_no}>
                         {employee.name}
                       </option>
                     ))}
@@ -2476,6 +3547,44 @@ export default function App() {
               <div>
                 <p className="label">Status</p>
                 <p className="value">{employeeProfile?.status || '-'}</p>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Employee Details</h2>
+                  <p className="muted">All information shared during onboarding.</p>
+                </div>
+              </div>
+              <div className="details-scroll">
+                <div className="details-grid">
+                  {EMPLOYEE_UPLOAD_FIELDS.map((field) => {
+                    const rawValue = employeeProfile?.[field.key]
+                    const displayValue =
+                      field.key === 'date_of_joining' ||
+                      field.key === 'date_of_releaving' ||
+                      field.key === 'date_of_birth'
+                        ? normalizeDateValue(rawValue)
+                        : rawValue
+                    return (
+                      <div className="detail-item" key={field.key}>
+                        <p className="label">{field.label}</p>
+                        <p className="value">{displayValue || '-'}</p>
+                      </div>
+                    )
+                  })}
+                  <div className="detail-item">
+                    <p className="label">Employment Status</p>
+                    <p className="value">{employeeProfile?.employment_status || '-'}</p>
+                  </div>
+                  <div className="detail-item">
+                    <p className="label">Date of Confirmation</p>
+                    <p className="value">
+                      {normalizeDateValue(employeeProfile?.confirmation_date) || '-'}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 

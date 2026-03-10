@@ -308,6 +308,16 @@ select:focus {
   color: #b91c1c;
 }
 
+.alert.info {
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.alert.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .main-header {
   display: flex;
   align-items: center;
@@ -557,6 +567,209 @@ select:focus {
   grid-column: 1 / -1;
 }
 
+.form-section {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.stepper {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.step {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.step.active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.step.done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.upload-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.upload-box {
+  display: grid;
+  gap: 10px;
+}
+
+.file-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px dashed #94a3b8;
+  background: #f8fafc;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.file-upload input {
+  display: none;
+}
+
+.upload-example .label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #64748b;
+}
+
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #1f2937;
+  font-size: 12px;
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.table-header.bulk,
+.table-row.bulk {
+  grid-template-columns: repeat(7, minmax(140px, 1fr));
+}
+
+.table-header.review,
+.table-row.review {
+  grid-template-columns: repeat(19, minmax(160px, 1fr));
+}
+
+.table-row.bulk input,
+.table-row.bulk select {
+  width: 100%;
+  min-width: 120px;
+}
+
+.table-row.bulk .issues {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+
+.modal-content {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 24px;
+  width: min(420px, 90vw);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
+  text-align: center;
+}
+
+.modal-content.modal-wide {
+  width: min(860px, 95vw);
+  text-align: left;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.details-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 60vh;
+  padding-bottom: 6px;
+}
+
+.detail-item {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.detail-item .label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #64748b;
+}
+
+.detail-item .value {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.modal-content h3 {
+  margin: 0 0 10px;
+}
+
+.modal-content p {
+  margin: 0 0 16px;
+  color: #475569;
+}
+
 .payslip-preview {
   background-image: url("/payslip-bg.jpg");
   background-size: cover;
@@ -718,6 +931,12 @@ input[readonly] {
 .table-row .actions {
   display: flex;
   gap: 8px;
+}
+
+.status-select {
+  width: 100%;
+  min-width: 120px;
+  height: 36px;
 }
 
 .status-badge {
